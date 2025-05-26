@@ -1,50 +1,110 @@
-# Cache Cleaner для macOS
+# CacheCleaner for macOS
 
-Приложение для управления кэшами в macOS. Позволяет просматривать и очищать различные типы кэшей, включая:
+A powerful and user-friendly application for managing cache files on macOS. This tool helps you monitor and clean various types of caches to free up disk space.
 
-- Общие кэши системы
-- Кэши Xcode (DerivedData, iOS Device Support, Archives)
-- Кэши симулятора iOS
+![CacheCleaner Screenshot](screenshots/main.png)
 
-## Функциональность
+## Features
 
-- Сканирование и отображение размеров кэшей
-- Отображение топ-10 самых больших кэшей
-- Детальная информация о кэшах Xcode
-- Возможность очистки отдельных кэшей
-- Подтверждение перед очисткой
-- Обновление информации после очистки
+- 📊 Display total cache size
+- 📋 Show top 10 largest cache directories
+- 🔍 Detailed Xcode cache information:
+  - DerivedData
+  - iOS Device Support
+  - Archives
+  - CoreSimulator
+- 🗑️ One-click cache cleaning
+- 🔄 Real-time size updates
+- 👀 Clear and intuitive interface
 
-## Требования
+## System Requirements
 
-- macOS 14.0 или новее
-- Xcode 15.0 или новее (для сборки)
+- macOS 14.0 or later
+- Xcode 15.0 or later (for building)
 
-## Установка
+## Installation
 
-1. Клонируйте репозиторий
-2. Откройте проект в Xcode
-3. Соберите и запустите приложение
+### From Source
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/CacheCleaner.git
+```
+2. Open the project in Xcode:
+```bash
+cd CacheCleaner
+open CacheCleaner.xcodeproj
+```
+3. Build and run the application
 
-## Использование
+### Binary Release
+> TODO: Binary releases are not yet available. Coming soon!
+<!-- 
+1. Download the latest release from the [Releases](https://github.com/yourusername/CacheCleaner/releases) page
+2. Move the application to your Applications folder
+-->
 
-1. Запустите приложение
-2. Нажмите кнопку "Сканировать" для анализа кэшей
-3. Просмотрите информацию о размерах кэшей
-4. Выберите кэш для очистки и подтвердите действие
+## Usage
 
-## Безопасность
+1. Launch CacheCleaner
+2. Click "Scan" to analyze cache sizes
+3. Review cache information:
+   - Total cache size
+   - Top 10 largest caches
+   - Xcode-specific caches
+4. Click the trash icon next to any cache to remove it
+5. Confirm deletion when prompted
 
-- Приложение запрашивает необходимые разрешения для доступа к системным файлам
-- Перед очисткой каждого кэша требуется подтверждение
-- Предоставляется информация о последствиях очистки каждого типа кэша
+## Cache Types
 
-## Примечание
+### General Caches
+- Application caches (`~/Library/Caches`)
+- System caches
+- Third-party application caches
 
-Очистка некоторых типов кэшей может привести к:
-- Необходимости пересборки проектов (DerivedData)
-- Повторной синхронизации устройств (iOS Device Support)
-- Повторной инициализации симуляторов
-- Временному замедлению работы IDE
+### Xcode Caches
+- **DerivedData**: Build outputs and intermediate files
+- **iOS Device Support**: Debug symbols and device support files
+- **Archives**: Application archives
+- **CoreSimulator**: iOS Simulator caches
+
+## Security
+
+- Requires specific permissions to access system files
+- Confirmation required before cache deletion
+- Sandboxed application for security
+- Clear warning messages about deletion consequences
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built with SwiftUI
+- Uses System Commands for accurate cache size calculation
+- Implements Apple's security guidelines
+
+## Support
+
+For support, please open an issue in the GitHub repository or contact the maintainers.
+
+## Disclaimer
+
+Please use this tool carefully. Clearing certain caches may:
+- Require application restarts
+- Cause temporary slowdowns during cache rebuilding
+- Require rebuilding of Xcode projects (DerivedData)
+- Need simulator reinitialization
+- Require device resynchronization (iOS Device Support)
+
+Always ensure you understand which caches you are clearing and their implications.
 
 
