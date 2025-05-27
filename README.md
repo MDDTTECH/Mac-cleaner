@@ -24,6 +24,9 @@ A powerful and user-friendly application for managing cache files on macOS. This
 
 ## Installation
 
+### Binary Release
+Download the latest version from the [Releases](https://github.com/yourusername/CacheCleaner/releases) page and move the application to your Applications folder.
+
 ### From Source
 1. Clone the repository:
 ```bash
@@ -36,12 +39,17 @@ open CacheCleaner.xcodeproj
 ```
 3. Build and run the application
 
-### Binary Release
-> TODO: Binary releases are not yet available. Coming soon!
-<!-- 
-1. Download the latest release from the [Releases](https://github.com/yourusername/CacheCleaner/releases) page
-2. Move the application to your Applications folder
--->
+### Building DMG
+To create a DMG installer:
+1. Make the build script executable:
+```bash
+chmod +x build.sh
+```
+2. Run the build script:
+```bash
+./build.sh
+```
+The DMG file will be created in the `build` directory.
 
 ## Usage
 
