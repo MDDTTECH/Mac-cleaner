@@ -16,51 +16,33 @@ A powerful and user-friendly application for managing cache files on macOS. This
 - 🗑️ One-click cache cleaning
 - 🔄 Real-time size updates
 - 👀 Clear and intuitive interface
+- 🔒 Signed and notarized by Apple
 
 ## System Requirements
 
 - macOS 14.0 or later
-- Xcode 15.0 or later (for building)
+- At least 50MB of free disk space
 
 ## Installation
 
-### Binary Release
-Download the latest version from the [Releases](https://github.com/yourusername/CacheCleaner/releases) page and move the application to your Applications folder.
+1. Download the latest version from the [Releases](https://github.com/yourusername/CacheCleaner/releases) page
+2. Double-click the downloaded DMG file
+3. Drag CacheCleaner to your Applications folder
+4. Launch CacheCleaner from Applications
 
-### From Source
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/CacheCleaner.git
-```
-2. Open the project in Xcode:
-```bash
-cd CacheCleaner
-open CacheCleaner.xcodeproj
-```
-3. Build and run the application
-
-### Building DMG
-To create a DMG installer:
-1. Make the build script executable:
-```bash
-chmod +x build.sh
-```
-2. Run the build script:
-```bash
-./build.sh
-```
-The DMG file will be created in the `build` directory.
+### Updating
+When updating to a new version:
+1. Quit CacheCleaner if it's running
+2. Download the new version
+3. Replace the old version in your Applications folder
 
 ## Usage
 
-1. Launch CacheCleaner
-2. Click "Scan" to analyze cache sizes
-3. Review cache information:
-   - Total cache size
-   - Top 10 largest caches
-   - Xcode-specific caches
-4. Click the trash icon next to any cache to remove it
-5. Confirm deletion when prompted
+1. Launch CacheCleaner from your Applications folder
+2. The app will automatically scan and display cache sizes
+3. Click on specific cache types to see detailed information
+4. Use the "Clean" button to remove selected cache types
+5. The app will show real-time progress during cleaning
 
 ## Cache Types
 
@@ -77,18 +59,28 @@ The DMG file will be created in the `build` directory.
 
 ## Security
 
-- Requires specific permissions to access system files
-- Confirmation required before cache deletion
-- Sandboxed application for security
-- Clear warning messages about deletion consequences
+CacheCleaner is designed with security in mind:
+- Only accesses standard cache locations
+- Requires explicit user confirmation before cleaning
+- Never modifies system files
+- All operations are logged and reversible
 
-## Contributing
+## Troubleshooting
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+If you encounter issues:
+
+1. **App won't open**
+   - Make sure you're running macOS 14.0 or later
+   - Try moving the app to a different folder and back to Applications
+
+2. **Permission Issues**
+   - Check System Settings → Privacy & Security
+   - Look for CacheCleaner in Full Disk Access
+   - Enable if requested
+
+3. **Other Issues**
+   - Check the Console app for any error messages
+   - Contact support with the error details
 
 ## License
 
