@@ -158,6 +158,10 @@ class CacheService {
         }
         
         xcodeCaches.derivedDataProjects = derivedDataProjects
+        
+        // Рассчитываем общий размер кэшей Xcode
+        let xcodeTotalSize = calculateXcodeTotalSize(xcodeCaches)
+        result.xcodeTotalSize = xcodeTotalSize
         result.xcodeCaches = xcodeCaches
         
         return result
@@ -249,6 +253,38 @@ class CacheService {
             path: path,
             size: size
         )
+    }
+    
+    private func calculateXcodeTotalSize(_ xcodeCaches: XcodeCacheInfo) -> String {
+        var totalBytes: Int = 0
+        
+        // Добавляем размеры основных кэшей
+        if let derivedData = xcodeCaches.derivedData {
+            totalBytes += parseSizeToBytes(derivedData.size) ?? 0
+        }
+        if let archives = xcodeCaches.archives {
+            totalBytes += parseSizeToBytes(archives.size) ?? 0
+        }
+        if let simulator = xcodeCaches.simulator {
+            totalBytes += parseSizeToBytes(simulator.size) ?? 0
+        }
+        
+        // Добавляем размеры устройств iOS Device Support
+        for device in xcodeCaches.iosDevices {
+            totalBytes += parseSizeToBytes(device.size) ?? 0
+        }
+        
+        // Добавляем размеры архивов
+        for archive in xcodeCaches.archiveList {
+            totalBytes += parseSizeToBytes(archive.size) ?? 0
+        }
+        
+        // Добавляем размеры проектов DerivedData
+        for project in xcodeCaches.derivedDataProjects {
+            totalBytes += parseSizeToBytes(project.size) ?? 0
+        }
+        
+        return formatBytes(totalBytes)
     }
     
     private func shellCommand(_ command: String) async -> String {

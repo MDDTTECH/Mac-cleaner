@@ -96,6 +96,7 @@ struct iOSDeviceInfo: Identifiable {
 
 struct CacheScanResult {
     var totalSize: String = "0B"
+    var xcodeTotalSize: String = "0B"
     var topCaches: [CacheInfo] = []
     var xcodeCaches: XcodeCacheInfo = .empty
     

@@ -15,6 +15,7 @@ struct ContentView: View {
                 ScrollView {
                     VStack(spacing: 20) {
                         totalSizeSection
+                        xcodeTotalSizeSection
                         topCachesSection
                         xcodeCachesSection
                     }
@@ -131,6 +132,17 @@ struct ContentView: View {
             Text(viewModel.scanResult.totalSize)
                 .font(.title2)
                 .foregroundColor(.blue)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    private var xcodeTotalSizeSection: some View {
+        VStack(alignment: .leading) {
+            Text("Размер кэшей Xcode")
+                .font(.headline)
+            Text(viewModel.scanResult.xcodeTotalSize)
+                .font(.title2)
+                .foregroundColor(.orange)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
