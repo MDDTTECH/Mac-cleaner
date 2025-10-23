@@ -56,7 +56,16 @@ class CacheService {
         var xcodeCaches = XcodeCacheInfo()
         for (path, keyPath) in xcodePaths {
             let fullPath = "\(realHomePath)/\(path)"
-            let size = await shellCommand("du -sh \"\(fullPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+            let sizeOutput = await shellCommand("du -sh \"\(fullPath)\" 2>/dev/null")
+            let size: String
+            
+            if sizeOutput.isEmpty {
+                // Если папка не существует или пуста, показываем 0B
+                size = "0B"
+            } else {
+                size = sizeOutput.components(separatedBy: "\t").first ?? "0B"
+            }
+            
             let cacheInfo = CacheInfo(path: fullPath, size: size)
             xcodeCaches[keyPath: keyPath] = cacheInfo
         }
@@ -120,6 +129,13 @@ class CacheService {
             
             return cachesResult.isEmpty && tempResult.isEmpty
         } else {
+            // Проверяем, существует ли папка перед удалением
+            let existsCheck = await shellCommand("test -d \"\(path)\" && echo 'exists' || echo 'not_exists'")
+            if existsCheck.contains("not_exists") {
+                // Папка уже не существует, считаем операцию успешной
+                return true
+            }
+            
             let output = await shellCommand("/bin/rm -rf \"\(path)\" 2>/dev/null")
             return output.isEmpty
         }
