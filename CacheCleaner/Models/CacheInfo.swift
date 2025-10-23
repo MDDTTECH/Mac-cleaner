@@ -9,6 +9,24 @@ struct CacheInfo: Identifiable {
     }
 }
 
+struct DerivedDataProjectInfo: Identifiable {
+    let id = UUID()
+    let projectName: String
+    let workspacePath: String
+    let lastAccessedDate: String
+    let path: String
+    let size: String
+    
+    var displayName: String {
+        return projectName
+    }
+    
+    var detailedDescription: String {
+        let fileName = workspacePath.components(separatedBy: "/").last ?? workspacePath
+        return "\(projectName)\nПуть: \(fileName)\nПоследний доступ: \(lastAccessedDate)"
+    }
+}
+
 struct ArchiveInfo: Identifiable {
     let id = UUID()
     let name: String
@@ -93,6 +111,7 @@ struct XcodeCacheInfo {
     var simulator: CacheInfo?
     var iosDevices: [iOSDeviceInfo] = []
     var archiveList: [ArchiveInfo] = []
+    var derivedDataProjects: [DerivedDataProjectInfo] = []
     
     static var empty: XcodeCacheInfo {
         XcodeCacheInfo()

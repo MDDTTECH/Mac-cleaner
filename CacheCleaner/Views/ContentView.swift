@@ -66,6 +66,20 @@ struct ContentView: View {
         } message: { archive in
             Text("Вы уверены, что хотите удалить архив \(archive.detailedDescription)?\n\nРазмер: \(archive.size)")
         }
+        .confirmationDialog(
+            "Удалить проект DerivedData?",
+            isPresented: $viewModel.showingDerivedDataConfirmation,
+            presenting: viewModel.selectedDerivedDataProject
+        ) { project in
+            Button("Удалить \(project.displayName)") {
+                Task {
+                    await viewModel.cleanDerivedDataProject(project)
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: { project in
+            Text("Вы уверены, что хотите удалить кэш сборки для проекта \(project.detailedDescription)?\n\nРазмер: \(project.size)\n\nПроект будет пересобран при следующем открытии в Xcode.")
+        }
     }
     
     private var headerSection: some View {
@@ -141,10 +155,15 @@ struct ContentView: View {
             Text("Кэши Xcode")
                 .font(.headline)
             
-            if let derivedData = viewModel.scanResult.xcodeCaches.derivedData {
-                CacheRowView(cache: derivedData, description: "DerivedData - кэш сборки", isDisabled: viewModel.isCleaning) {
-                    viewModel.selectedCache = derivedData
-                    viewModel.showingConfirmation = true
+            // DerivedData с раскрывающимся списком проектов
+            if !viewModel.scanResult.xcodeCaches.derivedDataProjects.isEmpty {
+                DisclosureGroup("DerivedData - кэш сборки") {
+                    ForEach(viewModel.scanResult.xcodeCaches.derivedDataProjects) { project in
+                        DerivedDataProjectRowView(project: project, isDisabled: viewModel.isCleaning) {
+                            viewModel.selectedDerivedDataProject = project
+                            viewModel.showingDerivedDataConfirmation = true
+                        }
+                    }
                 }
             }
             
@@ -237,6 +256,40 @@ struct ArchiveRowView: View {
             Spacer()
             
             Text(archive.size)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.blue)
+            
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .foregroundColor(isDisabled ? .gray : .red)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct DerivedDataProjectRowView: View {
+    let project: DerivedDataProjectInfo
+    let isDisabled: Bool
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(project.displayName)
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.medium)
+                
+                Text(project.detailedDescription)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Text(project.size)
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(.blue)
             

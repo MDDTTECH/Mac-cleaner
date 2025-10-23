@@ -48,9 +48,7 @@ class CacheService {
             }
         
         // Xcode кэши
-        let xcodePaths = [
-            "Library/Developer/Xcode/DerivedData": \XcodeCacheInfo.derivedData
-        ]
+        let xcodePaths: [String: WritableKeyPath<XcodeCacheInfo, CacheInfo?>] = [:]
         
         var xcodeCaches = XcodeCacheInfo()
         for (path, keyPath) in xcodePaths {
@@ -134,6 +132,32 @@ class CacheService {
         }
         
         xcodeCaches.archiveList = archiveList
+        
+        // Сканируем проекты DerivedData
+        let derivedDataPath = "\(realHomePath)/Library/Developer/Xcode/DerivedData"
+        let derivedDataSize = await shellCommand("du -sh \"\(derivedDataPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        let derivedDataInfo = CacheInfo(path: derivedDataPath, size: derivedDataSize)
+        xcodeCaches.derivedData = derivedDataInfo
+        
+        // Сканируем отдельные проекты DerivedData
+        let projectDirs = await shellCommand("ls \"\(derivedDataPath)\" 2>/dev/null")
+        var derivedDataProjects: [DerivedDataProjectInfo] = []
+        
+        for projectDir in projectDirs.components(separatedBy: "\n").filter({ !$0.isEmpty && !$0.contains(".noindex") }) {
+            let projectPath = "\(derivedDataPath)/\(projectDir)"
+            let projectSize = await shellCommand("du -sh \"\(projectPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+            
+            // Читаем info.plist проекта
+            let infoPlistPath = "\(projectPath)/info.plist"
+            let plistContent = await shellCommand("plutil -p \"\(infoPlistPath)\" 2>/dev/null")
+            
+            if !plistContent.isEmpty {
+                let projectInfo = parseDerivedDataProjectInfo(from: plistContent, path: projectPath, size: projectSize, projectDir: projectDir)
+                derivedDataProjects.append(projectInfo)
+            }
+        }
+        
+        xcodeCaches.derivedDataProjects = derivedDataProjects
         result.xcodeCaches = xcodeCaches
         
         return result
@@ -175,6 +199,11 @@ class CacheService {
         return output.isEmpty
     }
     
+    func cleanDerivedDataProject(_ project: DerivedDataProjectInfo) async -> Bool {
+        let output = await shellCommand("/bin/rm -rf \"\(project.path)\" 2>/dev/null")
+        return output.isEmpty
+    }
+    
     private func parseArchiveInfo(from plistContent: String, path: String, size: String) -> ArchiveInfo {
         // Простой парсинг plist контента
         let name = extractValue(from: plistContent, key: "Name") ?? "Unknown"
@@ -205,6 +234,21 @@ class CacheService {
             }
         }
         return nil
+    }
+    
+    private func parseDerivedDataProjectInfo(from plistContent: String, path: String, size: String, projectDir: String) -> DerivedDataProjectInfo {
+        // Извлекаем название проекта из имени папки (до первого дефиса)
+        let projectName = projectDir.components(separatedBy: "-").first ?? projectDir
+        let workspacePath = extractValue(from: plistContent, key: "WorkspacePath") ?? "Unknown"
+        let lastAccessedDate = extractValue(from: plistContent, key: "LastAccessedDate") ?? "Unknown"
+        
+        return DerivedDataProjectInfo(
+            projectName: projectName,
+            workspacePath: workspacePath,
+            lastAccessedDate: lastAccessedDate,
+            path: path,
+            size: size
+        )
     }
     
     private func shellCommand(_ command: String) async -> String {
