@@ -9,6 +9,8 @@ struct ContentView: View {
             
             if viewModel.isScanning {
                 ProgressView("Сканирование...")
+            } else if viewModel.isCleaning {
+                cleaningProgressSection
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
@@ -36,6 +38,20 @@ struct ContentView: View {
         } message: { cache in
             Text("Вы уверены, что хотите очистить \(cache.displayName)?")
         }
+        .confirmationDialog(
+            "Удалить символы устройства?",
+            isPresented: $viewModel.showingDeviceConfirmation,
+            presenting: viewModel.selectedDevice
+        ) { device in
+            Button("Удалить \(device.displayName)") {
+                Task {
+                    await viewModel.cleaniOSDevice(device)
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: { device in
+            Text("Вы уверены, что хотите удалить символы отладки для \(device.detailedDescription)?\n\nРазмер: \(device.size)\n\nСимволы будут перезагружены при следующем подключении устройства.")
+        }
     }
     
     private var headerSection: some View {
@@ -53,8 +69,31 @@ struct ContentView: View {
             }) {
                 Label("Сканировать", systemImage: "arrow.clockwise")
             }
-            .disabled(viewModel.isScanning)
+            .disabled(viewModel.isScanning || viewModel.isCleaning)
         }
+    }
+    
+    private var cleaningProgressSection: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.5)
+            
+            VStack(spacing: 8) {
+                Text("Очистка кэша")
+                    .font(.headline)
+                
+                if !viewModel.cleaningCacheName.isEmpty {
+                    Text(viewModel.cleaningCacheName)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                Text(viewModel.cleaningProgress)
+                    .font(.body)
+                    .foregroundColor(.blue)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var totalSizeSection: some View {
@@ -74,7 +113,7 @@ struct ContentView: View {
                 .font(.headline)
             
             ForEach(viewModel.scanResult.topCaches) { cache in
-                CacheRowView(cache: cache) {
+                CacheRowView(cache: cache, isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = cache
                     viewModel.showingConfirmation = true
                 }
@@ -89,28 +128,33 @@ struct ContentView: View {
                 .font(.headline)
             
             if let derivedData = viewModel.scanResult.xcodeCaches.derivedData {
-                CacheRowView(cache: derivedData, description: "DerivedData - кэш сборки") {
+                CacheRowView(cache: derivedData, description: "DerivedData - кэш сборки", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = derivedData
                     viewModel.showingConfirmation = true
                 }
             }
             
-            if let deviceSupport = viewModel.scanResult.xcodeCaches.deviceSupport {
-                CacheRowView(cache: deviceSupport, description: "iOS Device Support - символы отладки") {
-                    viewModel.selectedCache = deviceSupport
-                    viewModel.showingConfirmation = true
+            // iOS Device Support с раскрывающимся списком устройств
+            if !viewModel.scanResult.xcodeCaches.iosDevices.isEmpty {
+                DisclosureGroup("iOS Device Support - символы отладки") {
+                    ForEach(viewModel.scanResult.xcodeCaches.iosDevices) { device in
+                        iOSDeviceRowView(device: device, isDisabled: viewModel.isCleaning) {
+                            viewModel.selectedDevice = device
+                            viewModel.showingDeviceConfirmation = true
+                        }
+                    }
                 }
             }
             
             if let archives = viewModel.scanResult.xcodeCaches.archives {
-                CacheRowView(cache: archives, description: "Archives - архивы приложений") {
+                CacheRowView(cache: archives, description: "Archives - архивы приложений", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = archives
                     viewModel.showingConfirmation = true
                 }
             }
             
             if let simulator = viewModel.scanResult.xcodeCaches.simulator {
-                CacheRowView(cache: simulator, description: "CoreSimulator - кэши симулятора") {
+                CacheRowView(cache: simulator, description: "CoreSimulator - системные кэши и временные файлы симулятора", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = simulator
                     viewModel.showingConfirmation = true
                 }
@@ -120,14 +164,50 @@ struct ContentView: View {
     }
 }
 
+struct iOSDeviceRowView: View {
+    let device: iOSDeviceInfo
+    let isDisabled: Bool
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(device.displayName)
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.medium)
+                
+                Text(device.detailedDescription)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Text(device.size)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.blue)
+            
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .foregroundColor(isDisabled ? .gray : .red)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 struct CacheRowView: View {
     let cache: CacheInfo
     let description: String?
     let onClean: () -> Void
+    let isDisabled: Bool
     
-    init(cache: CacheInfo, description: String? = nil, onClean: @escaping () -> Void) {
+    init(cache: CacheInfo, description: String? = nil, isDisabled: Bool = false, onClean: @escaping () -> Void) {
         self.cache = cache
         self.description = description
+        self.isDisabled = isDisabled
         self.onClean = onClean
     }
     
@@ -151,9 +231,10 @@ struct CacheRowView: View {
             
             Button(action: onClean) {
                 Image(systemName: "trash")
-                    .foregroundColor(.red)
+                    .foregroundColor(isDisabled ? .gray : .red)
             }
             .buttonStyle(.plain)
+            .disabled(isDisabled)
         }
         .padding(.vertical, 4)
     }

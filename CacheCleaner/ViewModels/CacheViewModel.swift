@@ -7,6 +7,10 @@ class CacheViewModel: ObservableObject {
     @Published var showingConfirmation = false
     @Published var selectedCache: CacheInfo?
     @Published var isCleaning = false
+    @Published var cleaningProgress: String = ""
+    @Published var cleaningCacheName: String = ""
+    @Published var showingDeviceConfirmation = false
+    @Published var selectedDevice: iOSDeviceInfo?
     
     private let service = CacheService.shared
     
@@ -18,11 +22,49 @@ class CacheViewModel: ObservableObject {
     
     func cleanCache(_ cache: CacheInfo) async {
         isCleaning = true
+        cleaningCacheName = cache.displayName
+        cleaningProgress = "Начинаем очистку..."
+        
         let success = await service.cleanCache(cache.path)
+        
         if success {
+            cleaningProgress = "Очистка завершена. Обновляем данные..."
             // Обновляем результаты сканирования после очистки
             await scanCaches()
+            cleaningProgress = "Готово!"
+        } else {
+            cleaningProgress = "Ошибка при очистке"
         }
+        
+        // Небольшая задержка чтобы пользователь увидел сообщение
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 секунда
+        
         isCleaning = false
+        cleaningProgress = ""
+        cleaningCacheName = ""
+    }
+    
+    func cleaniOSDevice(_ device: iOSDeviceInfo) async {
+        isCleaning = true
+        cleaningCacheName = device.displayName
+        cleaningProgress = "Начинаем очистку..."
+        
+        let success = await service.cleaniOSDevice(device)
+        
+        if success {
+            cleaningProgress = "Очистка завершена. Обновляем данные..."
+            // Обновляем результаты сканирования после очистки
+            await scanCaches()
+            cleaningProgress = "Готово!"
+        } else {
+            cleaningProgress = "Ошибка при очистке"
+        }
+        
+        // Небольшая задержка чтобы пользователь увидел сообщение
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 секунда
+        
+        isCleaning = false
+        cleaningProgress = ""
+        cleaningCacheName = ""
     }
 } 

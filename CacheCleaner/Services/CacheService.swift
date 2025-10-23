@@ -50,9 +50,7 @@ class CacheService {
         // Xcode кэши
         let xcodePaths = [
             "Library/Developer/Xcode/DerivedData": \XcodeCacheInfo.derivedData,
-            "Library/Developer/Xcode/iOS DeviceSupport": \XcodeCacheInfo.deviceSupport,
-            "Library/Developer/Xcode/Archives": \XcodeCacheInfo.archives,
-            "Library/Developer/CoreSimulator": \XcodeCacheInfo.simulator
+            "Library/Developer/Xcode/Archives": \XcodeCacheInfo.archives
         ]
         
         var xcodeCaches = XcodeCacheInfo()
@@ -62,13 +60,73 @@ class CacheService {
             let cacheInfo = CacheInfo(path: fullPath, size: size)
             xcodeCaches[keyPath: keyPath] = cacheInfo
         }
+        
+        // CoreSimulator кэши (только кэши, не все данные симуляторов)
+        let simulatorCachesPath = "\(realHomePath)/Library/Developer/CoreSimulator/Caches"
+        let simulatorTempPath = "\(realHomePath)/Library/Developer/CoreSimulator/Temp"
+        
+        let simulatorCachesSize = await shellCommand("du -sh \"\(simulatorCachesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        let simulatorTempSize = await shellCommand("du -sh \"\(simulatorTempPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        
+        // Подсчитываем общий размер кэшей симулятора
+        let simulatorCacheInfo = CacheInfo(path: "\(realHomePath)/Library/Developer/CoreSimulator", size: simulatorCachesSize)
+        xcodeCaches.simulator = simulatorCacheInfo
+        
+        // Сканируем отдельные устройства iOS Device Support
+        let deviceSupportPath = "\(realHomePath)/Library/Developer/Xcode/iOS DeviceSupport"
+        let deviceDirs = await shellCommand("ls \"\(deviceSupportPath)\" 2>/dev/null")
+        
+        var iosDevices: [iOSDeviceInfo] = []
+        for deviceDir in deviceDirs.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
+            let devicePath = "\(deviceSupportPath)/\(deviceDir)"
+            let deviceSize = await shellCommand("du -sh \"\(devicePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+            
+            // Парсим информацию об устройстве из названия папки
+            // Формат: "iPhone16,1 26.0.1 (23A355)"
+            let components = deviceDir.components(separatedBy: " ")
+            if components.count >= 3 {
+                let deviceModel = components[0]
+                let iosVersion = components[1]
+                let buildNumber = components[2].trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+                
+                let deviceInfo = iOSDeviceInfo(
+                    deviceModel: deviceModel,
+                    iosVersion: iosVersion,
+                    buildNumber: buildNumber,
+                    path: devicePath,
+                    size: deviceSize
+                )
+                iosDevices.append(deviceInfo)
+            }
+        }
+        
+        xcodeCaches.iosDevices = iosDevices
         result.xcodeCaches = xcodeCaches
         
         return result
     }
     
     func cleanCache(_ path: String) async -> Bool {
-        let output = await shellCommand("/bin/rm -rf \"\(path)\" 2>/dev/null")
+        // Для CoreSimulator удаляем только кэши, не все данные симуляторов
+        if path.contains("CoreSimulator") {
+            let simulatorCachesPath = "\(realHomePath)/Library/Developer/CoreSimulator/Caches"
+            let simulatorTempPath = "\(realHomePath)/Library/Developer/CoreSimulator/Temp"
+            
+            let cachesResult = await shellCommand("/bin/rm -rf \"\(simulatorCachesPath)\"/* 2>/dev/null")
+            let tempResult = await shellCommand("/bin/rm -rf \"\(simulatorTempPath)\"/* 2>/dev/null")
+            
+            // Также очищаем кэши приложений в симуляторах
+            let appCachesResult = await shellCommand("find \"\(realHomePath)/Library/Developer/CoreSimulator/Devices\" -name \"*Cache*\" -type d -exec rm -rf {} \\; 2>/dev/null")
+            
+            return cachesResult.isEmpty && tempResult.isEmpty
+        } else {
+            let output = await shellCommand("/bin/rm -rf \"\(path)\" 2>/dev/null")
+            return output.isEmpty
+        }
+    }
+    
+    func cleaniOSDevice(_ device: iOSDeviceInfo) async -> Bool {
+        let output = await shellCommand("/bin/rm -rf \"\(device.path)\" 2>/dev/null")
         return output.isEmpty
     }
     
@@ -91,5 +149,35 @@ class CacheService {
             print("Error executing command: \(error)")
             return ""
         }
+    }
+    
+    private func parseSizeToBytes(_ sizeString: String) -> Int? {
+        let sizeString = sizeString.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if sizeString.hasSuffix("K") {
+            let number = String(sizeString.dropLast())
+            return Int(Double(number) ?? 0) * 1024
+        } else if sizeString.hasSuffix("M") {
+            let number = String(sizeString.dropLast())
+            return Int(Double(number) ?? 0) * 1024 * 1024
+        } else if sizeString.hasSuffix("G") {
+            let number = String(sizeString.dropLast())
+            return Int(Double(number) ?? 0) * 1024 * 1024 * 1024
+        } else if sizeString.hasSuffix("T") {
+            let number = String(sizeString.dropLast())
+            return Int(Double(number) ?? 0) * 1024 * 1024 * 1024 * 1024
+        } else if sizeString.hasSuffix("B") {
+            let number = String(sizeString.dropLast())
+            return Int(Double(number) ?? 0)
+        } else {
+            return Int(Double(sizeString) ?? 0)
+        }
+    }
+    
+    private func formatBytes(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
     }
 } 
