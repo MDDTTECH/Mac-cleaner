@@ -52,6 +52,20 @@ struct ContentView: View {
         } message: { device in
             Text("Вы уверены, что хотите удалить символы отладки для \(device.detailedDescription)?\n\nРазмер: \(device.size)\n\nСимволы будут перезагружены при следующем подключении устройства.")
         }
+        .confirmationDialog(
+            "Удалить архив?",
+            isPresented: $viewModel.showingArchiveConfirmation,
+            presenting: viewModel.selectedArchive
+        ) { archive in
+            Button("Удалить \(archive.displayName)") {
+                Task {
+                    await viewModel.cleanArchive(archive)
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: { archive in
+            Text("Вы уверены, что хотите удалить архив \(archive.detailedDescription)?\n\nРазмер: \(archive.size)")
+        }
     }
     
     private var headerSection: some View {
@@ -146,10 +160,15 @@ struct ContentView: View {
                 }
             }
             
-            if let archives = viewModel.scanResult.xcodeCaches.archives {
-                CacheRowView(cache: archives, description: "Archives - архивы приложений", isDisabled: viewModel.isCleaning) {
-                    viewModel.selectedCache = archives
-                    viewModel.showingConfirmation = true
+            // Archives с раскрывающимся списком архивов
+            if !viewModel.scanResult.xcodeCaches.archiveList.isEmpty {
+                DisclosureGroup("Archives - архивы приложений") {
+                    ForEach(viewModel.scanResult.xcodeCaches.archiveList) { archive in
+                        ArchiveRowView(archive: archive, isDisabled: viewModel.isCleaning) {
+                            viewModel.selectedArchive = archive
+                            viewModel.showingArchiveConfirmation = true
+                        }
+                    }
                 }
             }
             
@@ -184,6 +203,40 @@ struct iOSDeviceRowView: View {
             Spacer()
             
             Text(device.size)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.blue)
+            
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .foregroundColor(isDisabled ? .gray : .red)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct ArchiveRowView: View {
+    let archive: ArchiveInfo
+    let isDisabled: Bool
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(archive.displayName)
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.medium)
+                
+                Text(archive.detailedDescription)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Text(archive.size)
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(.blue)
             

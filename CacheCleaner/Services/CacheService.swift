@@ -49,8 +49,7 @@ class CacheService {
         
         // Xcode кэши
         let xcodePaths = [
-            "Library/Developer/Xcode/DerivedData": \XcodeCacheInfo.derivedData,
-            "Library/Developer/Xcode/Archives": \XcodeCacheInfo.archives
+            "Library/Developer/Xcode/DerivedData": \XcodeCacheInfo.derivedData
         ]
         
         var xcodeCaches = XcodeCacheInfo()
@@ -110,6 +109,31 @@ class CacheService {
         }
         
         xcodeCaches.iosDevices = iosDevices
+        
+        // Сканируем архивы
+        let archivesPath = "\(realHomePath)/Library/Developer/Xcode/Archives"
+        let archivesSize = await shellCommand("du -sh \"\(archivesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        let archivesInfo = CacheInfo(path: archivesPath, size: archivesSize)
+        xcodeCaches.archives = archivesInfo
+        
+        // Сканируем отдельные архивы
+        let archiveDirs = await shellCommand("find \"\(archivesPath)\" -name \"*.xcarchive\" -type d 2>/dev/null")
+        var archiveList: [ArchiveInfo] = []
+        
+        for archivePath in archiveDirs.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
+            let archiveSize = await shellCommand("du -sh \"\(archivePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+            
+            // Читаем Info.plist архива
+            let infoPlistPath = "\(archivePath)/Info.plist"
+            let plistContent = await shellCommand("plutil -p \"\(infoPlistPath)\" 2>/dev/null")
+            
+            if !plistContent.isEmpty {
+                let archiveInfo = parseArchiveInfo(from: plistContent, path: archivePath, size: archiveSize)
+                archiveList.append(archiveInfo)
+            }
+        }
+        
+        xcodeCaches.archiveList = archiveList
         result.xcodeCaches = xcodeCaches
         
         return result
@@ -144,6 +168,43 @@ class CacheService {
     func cleaniOSDevice(_ device: iOSDeviceInfo) async -> Bool {
         let output = await shellCommand("/bin/rm -rf \"\(device.path)\" 2>/dev/null")
         return output.isEmpty
+    }
+    
+    func cleanArchive(_ archive: ArchiveInfo) async -> Bool {
+        let output = await shellCommand("/bin/rm -rf \"\(archive.path)\" 2>/dev/null")
+        return output.isEmpty
+    }
+    
+    private func parseArchiveInfo(from plistContent: String, path: String, size: String) -> ArchiveInfo {
+        // Простой парсинг plist контента
+        let name = extractValue(from: plistContent, key: "Name") ?? "Unknown"
+        let bundleId = extractValue(from: plistContent, key: "CFBundleIdentifier") ?? "Unknown"
+        let version = extractValue(from: plistContent, key: "CFBundleShortVersionString") ?? "Unknown"
+        let buildNumber = extractValue(from: plistContent, key: "CFBundleVersion") ?? "Unknown"
+        let creationDate = extractValue(from: plistContent, key: "CreationDate") ?? "Unknown"
+        
+        return ArchiveInfo(
+            name: name,
+            bundleIdentifier: bundleId,
+            version: version,
+            buildNumber: buildNumber,
+            creationDate: creationDate,
+            path: path,
+            size: size
+        )
+    }
+    
+    private func extractValue(from content: String, key: String) -> String? {
+        let pattern = "\"\(key)\" => \"([^\"]+)\""
+        let regex = try? NSRegularExpression(pattern: pattern)
+        let range = NSRange(content.startIndex..., in: content)
+        
+        if let match = regex?.firstMatch(in: content, range: range) {
+            if let range = Range(match.range(at: 1), in: content) {
+                return String(content[range])
+            }
+        }
+        return nil
     }
     
     private func shellCommand(_ command: String) async -> String {

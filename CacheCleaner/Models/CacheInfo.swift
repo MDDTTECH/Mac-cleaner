@@ -9,6 +9,25 @@ struct CacheInfo: Identifiable {
     }
 }
 
+struct ArchiveInfo: Identifiable {
+    let id = UUID()
+    let name: String
+    let bundleIdentifier: String
+    let version: String
+    let buildNumber: String
+    let creationDate: String
+    let path: String
+    let size: String
+    
+    var displayName: String {
+        return "\(name) \(version) (\(buildNumber))"
+    }
+    
+    var detailedDescription: String {
+        return "\(name) - \(bundleIdentifier)\nВерсия: \(version), Билд: \(buildNumber)\nСоздан: \(creationDate)"
+    }
+}
+
 struct iOSDeviceInfo: Identifiable {
     let id = UUID()
     let deviceModel: String
@@ -73,6 +92,7 @@ struct XcodeCacheInfo {
     var archives: CacheInfo?
     var simulator: CacheInfo?
     var iosDevices: [iOSDeviceInfo] = []
+    var archiveList: [ArchiveInfo] = []
     
     static var empty: XcodeCacheInfo {
         XcodeCacheInfo()
