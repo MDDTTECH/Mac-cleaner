@@ -204,8 +204,37 @@ struct ContentView: View {
             }
             
             if let simulator = viewModel.scanResult.xcodeCaches.simulator {
-                CacheRowView(cache: simulator, description: "CoreSimulator - системные кэши и временные файлы симулятора", isDisabled: viewModel.isCleaning) {
+                CacheRowView(cache: simulator, description: "CoreSimulator - кэши симуляторов (приложения и симуляторы сохраняются)", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = simulator
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            // Новые кэши для macOS 26+
+            if let developerDiskImages = viewModel.scanResult.xcodeCaches.developerDiskImages {
+                CacheRowView(cache: developerDiskImages, description: "DeveloperDiskImages - образы для разработки устройств", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = developerDiskImages
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            if let xcpgDevices = viewModel.scanResult.xcodeCaches.xcpgDevices {
+                CacheRowView(cache: xcpgDevices, description: "XCPGDevices - данные подключенных устройств", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = xcpgDevices
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            if let dvtDownloads = viewModel.scanResult.xcodeCaches.dvtDownloads {
+                CacheRowView(cache: dvtDownloads, description: "DVTDownloads - загрузки Xcode и инструменты", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = dvtDownloads
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            if let xcTestDevices = viewModel.scanResult.xcodeCaches.xcTestDevices {
+                CacheRowView(cache: xcTestDevices, description: "XCTestDevices - данные для тестирования на устройствах", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = xcTestDevices
                     viewModel.showingConfirmation = true
                 }
             }

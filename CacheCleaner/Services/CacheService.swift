@@ -48,34 +48,30 @@ class CacheService {
             }
         
         // Xcode кэши
-        let xcodePaths: [String: WritableKeyPath<XcodeCacheInfo, CacheInfo?>] = [:]
-        
         var xcodeCaches = XcodeCacheInfo()
-        for (path, keyPath) in xcodePaths {
-            let fullPath = "\(realHomePath)/\(path)"
-            let sizeOutput = await shellCommand("du -sh \"\(fullPath)\" 2>/dev/null")
-            let size: String
-            
-            if sizeOutput.isEmpty {
-                // Если папка не существует или пуста, показываем 0B
-                size = "0B"
-            } else {
-                size = sizeOutput.components(separatedBy: "\t").first ?? "0B"
-            }
-            
-            let cacheInfo = CacheInfo(path: fullPath, size: size)
-            xcodeCaches[keyPath: keyPath] = cacheInfo
-        }
         
         // CoreSimulator кэши (только кэши, не все данные симуляторов)
-        let simulatorCachesPath = "\(realHomePath)/Library/Developer/CoreSimulator/Caches"
-        let simulatorTempPath = "\(realHomePath)/Library/Developer/CoreSimulator/Temp"
+        let simulatorBasePath = "\(realHomePath)/Library/Developer/CoreSimulator"
+        let simulatorCachesPath = "\(simulatorBasePath)/Caches"
+        let simulatorTempPath = "\(simulatorBasePath)/Temp"
         
-        let simulatorCachesSize = await shellCommand("du -sh \"\(simulatorCachesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
-        let simulatorTempSize = await shellCommand("du -sh \"\(simulatorTempPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        // Считаем размер системных кэшей
+        var simulatorTotalBytes: Int = 0
+        let cachesSize = await shellCommand("du -sh \"\(simulatorCachesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        let tempSize = await shellCommand("du -sh \"\(simulatorTempPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
         
-        // Подсчитываем общий размер кэшей симулятора
-        let simulatorCacheInfo = CacheInfo(path: "\(realHomePath)/Library/Developer/CoreSimulator", size: simulatorCachesSize)
+        simulatorTotalBytes += parseSizeToBytes(cachesSize) ?? 0
+        simulatorTotalBytes += parseSizeToBytes(tempSize) ?? 0
+        
+        // Считаем кэши внутри каждого симулятора (Devices/*/data/Library/Caches)
+        let deviceCachesCommand = "find \"\(simulatorBasePath)/Devices\" -path '*/data/Library/Caches' -type d -exec du -sk {} \\; 2>/dev/null | awk '{sum+=$1} END {print sum}'"
+        let deviceCachesSizeKB = await shellCommand(deviceCachesCommand)
+        if let sizeKB = Int(deviceCachesSizeKB.trimmingCharacters(in: .whitespacesAndNewlines)), sizeKB > 0 {
+            simulatorTotalBytes += sizeKB * 1024
+        }
+        
+        let simulatorTotalSize = formatBytes(simulatorTotalBytes)
+        let simulatorCacheInfo = CacheInfo(path: simulatorBasePath, size: simulatorTotalSize)
         xcodeCaches.simulator = simulatorCacheInfo
         
         // Сканируем отдельные устройства iOS Device Support
@@ -159,6 +155,31 @@ class CacheService {
         
         xcodeCaches.derivedDataProjects = derivedDataProjects
         
+        // Новые папки для macOS 26+
+        let developerDiskImagesPath = "\(realHomePath)/Library/Developer/DeveloperDiskImages"
+        let developerDiskImagesSize = await shellCommand("du -sh \"\(developerDiskImagesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if developerDiskImagesSize != "0B" {
+            xcodeCaches.developerDiskImages = CacheInfo(path: developerDiskImagesPath, size: developerDiskImagesSize)
+        }
+        
+        let xcpgDevicesPath = "\(realHomePath)/Library/Developer/XCPGDevices"
+        let xcpgDevicesSize = await shellCommand("du -sh \"\(xcpgDevicesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if xcpgDevicesSize != "0B" {
+            xcodeCaches.xcpgDevices = CacheInfo(path: xcpgDevicesPath, size: xcpgDevicesSize)
+        }
+        
+        let dvtDownloadsPath = "\(realHomePath)/Library/Developer/DVTDownloads"
+        let dvtDownloadsSize = await shellCommand("du -sh \"\(dvtDownloadsPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if dvtDownloadsSize != "0B" {
+            xcodeCaches.dvtDownloads = CacheInfo(path: dvtDownloadsPath, size: dvtDownloadsSize)
+        }
+        
+        let xcTestDevicesPath = "\(realHomePath)/Library/Developer/XCTestDevices"
+        let xcTestDevicesSize = await shellCommand("du -sh \"\(xcTestDevicesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if xcTestDevicesSize != "0B" {
+            xcodeCaches.xcTestDevices = CacheInfo(path: xcTestDevicesPath, size: xcTestDevicesSize)
+        }
+        
         // Рассчитываем общий размер кэшей Xcode
         let xcodeTotalSize = calculateXcodeTotalSize(xcodeCaches)
         result.xcodeTotalSize = xcodeTotalSize
@@ -173,13 +194,15 @@ class CacheService {
             let simulatorCachesPath = "\(realHomePath)/Library/Developer/CoreSimulator/Caches"
             let simulatorTempPath = "\(realHomePath)/Library/Developer/CoreSimulator/Temp"
             
-            let cachesResult = await shellCommand("/bin/rm -rf \"\(simulatorCachesPath)\"/* 2>/dev/null")
-            let tempResult = await shellCommand("/bin/rm -rf \"\(simulatorTempPath)\"/* 2>/dev/null")
+            // Очищаем системные кэши
+            _ = await shellCommand("/bin/rm -rf \"\(simulatorCachesPath)\"/* 2>/dev/null")
+            _ = await shellCommand("/bin/rm -rf \"\(simulatorTempPath)\"/* 2>/dev/null")
             
-            // Также очищаем кэши приложений в симуляторах
-            let appCachesResult = await shellCommand("find \"\(realHomePath)/Library/Developer/CoreSimulator/Devices\" -name \"*Cache*\" -type d -exec rm -rf {} \\; 2>/dev/null")
+            // Очищаем кэши внутри каждого симулятора (только папки Caches, не приложения)
+            _ = await shellCommand("find \"\(realHomePath)/Library/Developer/CoreSimulator/Devices\" -path '*/data/Library/Caches/*' -maxdepth 10 -type f -delete 2>/dev/null")
             
-            return cachesResult.isEmpty && tempResult.isEmpty
+            // Проверяем успешность (если нет ошибок, вернется пустая строка)
+            return true
         } else {
             // Проверяем, существует ли папка перед удалением
             let existsCheck = await shellCommand("test -d \"\(path)\" && echo 'exists' || echo 'not_exists'")
@@ -267,6 +290,20 @@ class CacheService {
         }
         if let simulator = xcodeCaches.simulator {
             totalBytes += parseSizeToBytes(simulator.size) ?? 0
+        }
+        
+        // Добавляем размеры новых папок macOS 26+
+        if let developerDiskImages = xcodeCaches.developerDiskImages {
+            totalBytes += parseSizeToBytes(developerDiskImages.size) ?? 0
+        }
+        if let xcpgDevices = xcodeCaches.xcpgDevices {
+            totalBytes += parseSizeToBytes(xcpgDevices.size) ?? 0
+        }
+        if let dvtDownloads = xcodeCaches.dvtDownloads {
+            totalBytes += parseSizeToBytes(dvtDownloads.size) ?? 0
+        }
+        if let xcTestDevices = xcodeCaches.xcTestDevices {
+            totalBytes += parseSizeToBytes(xcTestDevices.size) ?? 0
         }
         
         // Добавляем размеры устройств iOS Device Support

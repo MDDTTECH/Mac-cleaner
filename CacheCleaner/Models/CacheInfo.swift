@@ -114,6 +114,12 @@ struct XcodeCacheInfo {
     var archiveList: [ArchiveInfo] = []
     var derivedDataProjects: [DerivedDataProjectInfo] = []
     
+    // Новые папки для macOS 26
+    var developerDiskImages: CacheInfo?
+    var xcpgDevices: CacheInfo?
+    var dvtDownloads: CacheInfo?
+    var xcTestDevices: CacheInfo?
+    
     static var empty: XcodeCacheInfo {
         XcodeCacheInfo()
     }
