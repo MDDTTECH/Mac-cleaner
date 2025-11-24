@@ -4,6 +4,8 @@ import SwiftUI
 class CacheViewModel: ObservableObject {
     @Published var scanResult = CacheScanResult.empty
     @Published var isScanning = false
+    @Published var scanningProgress: String = "Сканирование..."
+    @Published var isQuickScan = true
     @Published var showingConfirmation = false
     @Published var selectedCache: CacheInfo?
     @Published var isCleaning = false
@@ -15,12 +17,20 @@ class CacheViewModel: ObservableObject {
     @Published var selectedArchive: ArchiveInfo?
     @Published var showingDerivedDataConfirmation = false
     @Published var selectedDerivedDataProject: DerivedDataProjectInfo?
+    @Published var showingFlutterPackageConfirmation = false
+    @Published var selectedFlutterPackage: FlutterPackageVersion?
     
     private let service = CacheService.shared
     
-    func scanCaches() async {
+    func scanCaches(quick: Bool = true) async {
         isScanning = true
-        scanResult = await service.scanCaches()
+        isQuickScan = quick
+        scanningProgress = quick ? "Быстрое сканирование..." : "Полное сканирование..."
+        scanResult = await service.scanCaches(quickScan: quick) { progress in
+            await MainActor.run {
+                self.scanningProgress = progress
+            }
+        }
         isScanning = false
     }
     
@@ -102,6 +112,30 @@ class CacheViewModel: ObservableObject {
         cleaningProgress = "Начинаем очистку..."
         
         let success = await service.cleanDerivedDataProject(project)
+        
+        if success {
+            cleaningProgress = "Очистка завершена. Обновляем данные..."
+            // Обновляем результаты сканирования после очистки
+            await scanCaches()
+            cleaningProgress = "Готово!"
+        } else {
+            cleaningProgress = "Ошибка при очистке"
+        }
+        
+        // Небольшая задержка чтобы пользователь увидел сообщение
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 секунда
+        
+        isCleaning = false
+        cleaningProgress = ""
+        cleaningCacheName = ""
+    }
+    
+    func cleanFlutterPackageVersion(_ package: FlutterPackageVersion) async {
+        isCleaning = true
+        cleaningCacheName = package.displayName
+        cleaningProgress = "Начинаем очистку..."
+        
+        let success = await service.cleanFlutterPackageVersion(package)
         
         if success {
             cleaningProgress = "Очистка завершена. Обновляем данные..."

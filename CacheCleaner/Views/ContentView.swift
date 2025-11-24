@@ -8,16 +8,46 @@ struct ContentView: View {
             headerSection
             
             if viewModel.isScanning {
-                ProgressView("Сканирование...")
+                VStack(spacing: 20) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    
+                    Text(viewModel.scanningProgress)
+                        .font(.headline)
+                        .foregroundColor(.blue)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.isCleaning {
                 cleaningProgressSection
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
-                        totalSizeSection
-                        xcodeTotalSizeSection
-                        topCachesSection
-                        xcodeCachesSection
+                        // Блок 1: Общие кэши
+                        VStack(alignment: .leading, spacing: 10) {
+                            totalSizeSection
+                            topCachesSection
+                        }
+                        
+                        Divider()
+                        
+                        // Блок 2: Xcode кэши
+                        VStack(alignment: .leading, spacing: 10) {
+                            xcodeTotalSizeSection
+                            xcodeCachesSection
+                        }
+                        
+                        Divider()
+                        
+                        // Блок 3: Кэши разработки
+                        VStack(alignment: .leading, spacing: 10) {
+                            developmentTotalSizeSection
+                            developmentCachesSection
+                        }
+                        
+                        if viewModel.isQuickScan {
+                            Divider()
+                            quickScanInfoSection
+                        }
                     }
                     .padding()
                 }
@@ -80,6 +110,20 @@ struct ContentView: View {
             Button("Отмена", role: .cancel) {}
         } message: { project in
             Text("Вы уверены, что хотите удалить кэш сборки для проекта \(project.detailedDescription)?\n\nРазмер: \(project.size)\n\nПроект будет пересобран при следующем открытии в Xcode.")
+        }
+        .confirmationDialog(
+            "Удалить Flutter пакет?",
+            isPresented: $viewModel.showingFlutterPackageConfirmation,
+            presenting: viewModel.selectedFlutterPackage
+        ) { package in
+            Button("Удалить \(package.displayName)") {
+                Task {
+                    await viewModel.cleanFlutterPackageVersion(package)
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: { package in
+            Text("Вы уверены, что хотите удалить Flutter пакет \(package.displayName)?\n\nРазмер: \(package.size)\n\nПакет будет скачан при следующем запуске flutter pub get.")
         }
     }
     
@@ -147,64 +191,168 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
+    private var developmentTotalSizeSection: some View {
+        VStack(alignment: .leading) {
+            Text("Размер кэшей разработки (Flutter, Gradle, npm)")
+                .font(.headline)
+            Text(viewModel.scanResult.developmentTotalSize)
+                .font(.title2)
+                .foregroundColor(.green)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    private var quickScanInfoSection: some View {
+        HStack {
+            Image(systemName: "info.circle.fill")
+                .foregroundColor(.blue)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Быстрое сканирование")
+                    .font(.headline)
+                Text("Детальная информация о Xcode проектах и архивах скрыта для ускорения")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Button("Полное сканирование") {
+                Task {
+                    await viewModel.scanCaches(quick: false)
+                }
+            }
+            .disabled(viewModel.isScanning || viewModel.isCleaning)
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(10)
+    }
+    
     private var topCachesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Топ 10 самых больших кэшей")
-                .font(.headline)
-            
-            ForEach(viewModel.scanResult.topCaches) { cache in
-                CacheRowView(cache: cache, isDisabled: viewModel.isCleaning) {
-                    viewModel.selectedCache = cache
-                    viewModel.showingConfirmation = true
+            if !viewModel.scanResult.topCaches.isEmpty {
+                DisclosureGroup {
+                    ForEach(viewModel.scanResult.topCaches) { cache in
+                        CacheRowView(cache: cache, isDisabled: viewModel.isCleaning) {
+                            viewModel.selectedCache = cache
+                            viewModel.showingConfirmation = true
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Топ 10 самых больших папок")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Image(systemName: "folder.fill")
+                            .foregroundColor(.blue)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
+    private func cacheHeaderLabel(cache: CacheInfo, description: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(cache.displayName)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Text(cache.size)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.orange)
+            Button(action: {
+                viewModel.selectedCache = cache
+                viewModel.showingConfirmation = true
+            }) {
+                Image(systemName: "trash")
+                    .foregroundColor(viewModel.isCleaning ? .gray : .red)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isCleaning)
+        }
+    }
+    
     private var xcodeCachesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Кэши Xcode")
-                .font(.headline)
-            
             // DerivedData с раскрывающимся списком проектов
-            if !viewModel.scanResult.xcodeCaches.derivedDataProjects.isEmpty {
-                DisclosureGroup("DerivedData - кэш сборки") {
-                    ForEach(viewModel.scanResult.xcodeCaches.derivedDataProjects) { project in
-                        DerivedDataProjectRowView(project: project, isDisabled: viewModel.isCleaning) {
-                            viewModel.selectedDerivedDataProject = project
-                            viewModel.showingDerivedDataConfirmation = true
+            if let derivedData = viewModel.scanResult.xcodeCaches.derivedData {
+                if !viewModel.scanResult.xcodeCaches.derivedDataProjects.isEmpty {
+                    // Полное сканирование - показываем проекты
+                    DisclosureGroup {
+                        ForEach(viewModel.scanResult.xcodeCaches.derivedDataProjects) { project in
+                            DerivedDataProjectRowView(project: project, isDisabled: viewModel.isCleaning) {
+                                viewModel.selectedDerivedDataProject = project
+                                viewModel.showingDerivedDataConfirmation = true
+                            }
                         }
+                    } label: {
+                        cacheHeaderLabel(cache: derivedData, description: "кэш сборки")
+                    }
+                } else {
+                    // Быстрое сканирование - только размер
+                    CacheRowView(cache: derivedData, description: "кэш сборки", isDisabled: viewModel.isCleaning) {
+                        viewModel.selectedCache = derivedData
+                        viewModel.showingConfirmation = true
                     }
                 }
             }
             
             // iOS Device Support с раскрывающимся списком устройств
-            if !viewModel.scanResult.xcodeCaches.iosDevices.isEmpty {
-                DisclosureGroup("iOS Device Support - символы отладки") {
-                    ForEach(viewModel.scanResult.xcodeCaches.iosDevices) { device in
-                        iOSDeviceRowView(device: device, isDisabled: viewModel.isCleaning) {
-                            viewModel.selectedDevice = device
-                            viewModel.showingDeviceConfirmation = true
+            if let deviceSupport = viewModel.scanResult.xcodeCaches.deviceSupport {
+                if !viewModel.scanResult.xcodeCaches.iosDevices.isEmpty {
+                    // Полное сканирование - показываем устройства
+                    DisclosureGroup {
+                        ForEach(viewModel.scanResult.xcodeCaches.iosDevices) { device in
+                            iOSDeviceRowView(device: device, isDisabled: viewModel.isCleaning) {
+                                viewModel.selectedDevice = device
+                                viewModel.showingDeviceConfirmation = true
+                            }
                         }
+                    } label: {
+                        cacheHeaderLabel(cache: deviceSupport, description: "символы отладки")
+                    }
+                } else {
+                    // Быстрое сканирование - только размер
+                    CacheRowView(cache: deviceSupport, description: "символы отладки", isDisabled: viewModel.isCleaning) {
+                        viewModel.selectedCache = deviceSupport
+                        viewModel.showingConfirmation = true
                     }
                 }
             }
             
             // Archives с раскрывающимся списком архивов
-            if !viewModel.scanResult.xcodeCaches.archiveList.isEmpty {
-                DisclosureGroup("Archives - архивы приложений") {
-                    ForEach(viewModel.scanResult.xcodeCaches.archiveList) { archive in
-                        ArchiveRowView(archive: archive, isDisabled: viewModel.isCleaning) {
-                            viewModel.selectedArchive = archive
-                            viewModel.showingArchiveConfirmation = true
+            if let archives = viewModel.scanResult.xcodeCaches.archives {
+                if !viewModel.scanResult.xcodeCaches.archiveList.isEmpty {
+                    // Полное сканирование - показываем архивы
+                    DisclosureGroup {
+                        ForEach(viewModel.scanResult.xcodeCaches.archiveList) { archive in
+                            ArchiveRowView(archive: archive, isDisabled: viewModel.isCleaning) {
+                                viewModel.selectedArchive = archive
+                                viewModel.showingArchiveConfirmation = true
+                            }
                         }
+                    } label: {
+                        cacheHeaderLabel(cache: archives, description: "архивы приложений")
+                    }
+                } else {
+                    // Быстрое сканирование - только размер
+                    CacheRowView(cache: archives, description: "архивы приложений", isDisabled: viewModel.isCleaning) {
+                        viewModel.selectedCache = archives
+                        viewModel.showingConfirmation = true
                     }
                 }
             }
             
             if let simulator = viewModel.scanResult.xcodeCaches.simulator {
-                CacheRowView(cache: simulator, description: "CoreSimulator - кэши симуляторов (приложения и симуляторы сохраняются)", isDisabled: viewModel.isCleaning) {
+                CacheRowView(cache: simulator, description: "кэши симуляторов", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = simulator
                     viewModel.showingConfirmation = true
                 }
@@ -212,34 +360,102 @@ struct ContentView: View {
             
             // Новые кэши для macOS 26+
             if let developerDiskImages = viewModel.scanResult.xcodeCaches.developerDiskImages {
-                CacheRowView(cache: developerDiskImages, description: "DeveloperDiskImages - образы для разработки устройств", isDisabled: viewModel.isCleaning) {
+                CacheRowView(cache: developerDiskImages, description: "образы для разработки", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = developerDiskImages
                     viewModel.showingConfirmation = true
                 }
             }
             
             if let xcpgDevices = viewModel.scanResult.xcodeCaches.xcpgDevices {
-                CacheRowView(cache: xcpgDevices, description: "XCPGDevices - данные подключенных устройств", isDisabled: viewModel.isCleaning) {
+                CacheRowView(cache: xcpgDevices, description: "данные устройств", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = xcpgDevices
                     viewModel.showingConfirmation = true
                 }
             }
             
             if let dvtDownloads = viewModel.scanResult.xcodeCaches.dvtDownloads {
-                CacheRowView(cache: dvtDownloads, description: "DVTDownloads - загрузки Xcode и инструменты", isDisabled: viewModel.isCleaning) {
+                CacheRowView(cache: dvtDownloads, description: "загрузки и инструменты", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = dvtDownloads
                     viewModel.showingConfirmation = true
                 }
             }
             
             if let xcTestDevices = viewModel.scanResult.xcodeCaches.xcTestDevices {
-                CacheRowView(cache: xcTestDevices, description: "XCTestDevices - данные для тестирования на устройствах", isDisabled: viewModel.isCleaning) {
+                CacheRowView(cache: xcTestDevices, description: "данные тестирования", isDisabled: viewModel.isCleaning) {
                     viewModel.selectedCache = xcTestDevices
                     viewModel.showingConfirmation = true
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    private var developmentCachesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Flutter Pub Cache (детальное сканирование отключено из-за медленности)
+            if let pubCache = viewModel.scanResult.developmentCaches.pubCache {
+                CacheRowView(cache: pubCache, description: "пакеты Dart/Flutter", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = pubCache
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            // Gradle cache
+            if let gradleCache = viewModel.scanResult.developmentCaches.gradleCache {
+                CacheRowView(cache: gradleCache, description: "кэш сборки Android", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = gradleCache
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            // npm cache
+            if let npmCache = viewModel.scanResult.developmentCaches.npmCache {
+                CacheRowView(cache: npmCache, description: "кэш Node.js пакетов", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = npmCache
+                    viewModel.showingConfirmation = true
+                }
+            }
+            
+            // ~/.cache
+            if let homeCache = viewModel.scanResult.developmentCaches.homeCache {
+                CacheRowView(cache: homeCache, description: "системный кэш", isDisabled: viewModel.isCleaning) {
+                    viewModel.selectedCache = homeCache
+                    viewModel.showingConfirmation = true
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct FlutterPackageVersionRowView: View {
+    let package: FlutterPackageVersion
+    let isDisabled: Bool
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(package.version)
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.medium)
+                    .padding(.leading, 20)
+            }
+            
+            Spacer()
+            
+            Text(package.size)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.green)
+            
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .foregroundColor(isDisabled ? .gray : .red)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+        }
+        .padding(.vertical, 2)
     }
 }
 

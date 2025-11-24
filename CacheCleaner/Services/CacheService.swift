@@ -13,12 +13,14 @@ class CacheService {
         ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
     }
     
-    func scanCaches() async -> CacheScanResult {
+    func scanCaches(quickScan: Bool = true, progressCallback: @escaping (String) async -> Void = { _ in }) async -> CacheScanResult {
+        print("=== CacheCleaner: Starting scan (quickScan: \(quickScan)) ===")
         var result = CacheScanResult()
         
         // Общий размер кэшей
+        await progressCallback("Сканирование общих кэшей...")
         let cachesPath = "\(realHomePath)/Library/Caches"
-        print("Scanning path: \(cachesPath)")
+        print("CacheCleaner: Scanning path: \(cachesPath)")
         
         let duCommand = "du -sh \"\(cachesPath)\" 2>/dev/null"
         print("Executing command: \(duCommand)")
@@ -35,9 +37,12 @@ class CacheService {
         }
         print("Parsed size: \(result.totalSize)")
         
-        // Топ кэшей
-        let topCachesCommand = "find \"\(cachesPath)\" -maxdepth 1 -mindepth 1 -type d -exec du -sh {} \\; 2>/dev/null | sort -hr | head -n 10"
+        // Топ кэшей - оптимизированная команда
+        print("CacheCleaner: Analyzing top 10 caches...")
+        await progressCallback("Анализ топ-10 кэшей...")
+        let topCachesCommand = "du -sh \"\(cachesPath)\"/*/ 2>/dev/null | sort -hr | head -n 10"
         let topCachesOutput = await shellCommand(topCachesCommand)
+        print("CacheCleaner: Top caches output length: \(topCachesOutput.count) chars")
         result.topCaches = topCachesOutput
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
@@ -48,9 +53,12 @@ class CacheService {
             }
         
         // Xcode кэши
+        print("CacheCleaner: Scanning Xcode caches...")
+        await progressCallback("Сканирование Xcode кэшей...")
         var xcodeCaches = XcodeCacheInfo()
         
         // CoreSimulator кэши (только кэши, не все данные симуляторов)
+        print("CacheCleaner: Scanning CoreSimulator...")
         let simulatorBasePath = "\(realHomePath)/Library/Developer/CoreSimulator"
         let simulatorCachesPath = "\(simulatorBasePath)/Caches"
         let simulatorTempPath = "\(simulatorBasePath)/Temp"
@@ -74,85 +82,97 @@ class CacheService {
         let simulatorCacheInfo = CacheInfo(path: simulatorBasePath, size: simulatorTotalSize)
         xcodeCaches.simulator = simulatorCacheInfo
         
-        // Сканируем отдельные устройства iOS Device Support
+        // Сканируем iOS Device Support
         let deviceSupportPath = "\(realHomePath)/Library/Developer/Xcode/iOS DeviceSupport"
-        let deviceDirs = await shellCommand("ls \"\(deviceSupportPath)\" 2>/dev/null")
-        
-        var iosDevices: [iOSDeviceInfo] = []
-        for deviceDir in deviceDirs.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
-            let devicePath = "\(deviceSupportPath)/\(deviceDir)"
-            let deviceSize = await shellCommand("du -sh \"\(devicePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
-            
-            // Парсим информацию об устройстве из названия папки
-            // Формат: "iPhone16,1 26.0.1 (23A355)"
-            let components = deviceDir.components(separatedBy: " ")
-            if components.count >= 3 {
-                let deviceModel = components[0]
-                let iosVersion = components[1]
-                let buildNumber = components[2].trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-                
-                let deviceInfo = iOSDeviceInfo(
-                    deviceModel: deviceModel,
-                    iosVersion: iosVersion,
-                    buildNumber: buildNumber,
-                    path: devicePath,
-                    size: deviceSize
-                )
-                iosDevices.append(deviceInfo)
-            }
+        let deviceSupportSize = await shellCommand("du -sh \"\(deviceSupportPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if deviceSupportSize != "0B" {
+            xcodeCaches.deviceSupport = CacheInfo(path: deviceSupportPath, size: deviceSupportSize)
         }
         
+        // Сканируем отдельные устройства iOS Device Support (только если не быстрое сканирование)
+        var iosDevices: [iOSDeviceInfo] = []
+        if !quickScan {
+            await progressCallback("Детальное сканирование iOS Device Support...")
+            let deviceDirs = await shellCommand("ls \"\(deviceSupportPath)\" 2>/dev/null")
+            
+            for deviceDir in deviceDirs.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
+                let devicePath = "\(deviceSupportPath)/\(deviceDir)"
+                let deviceSize = await shellCommand("du -sh \"\(devicePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+                
+                // Парсим информацию об устройстве из названия папки
+                // Формат: "iPhone16,1 26.0.1 (23A355)"
+                let components = deviceDir.components(separatedBy: " ")
+                if components.count >= 3 {
+                    let deviceModel = components[0]
+                    let iosVersion = components[1]
+                    let buildNumber = components[2].trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+                    
+                    let deviceInfo = iOSDeviceInfo(
+                        deviceModel: deviceModel,
+                        iosVersion: iosVersion,
+                        buildNumber: buildNumber,
+                        path: devicePath,
+                        size: deviceSize
+                    )
+                    iosDevices.append(deviceInfo)
+                }
+            }
+        }
         xcodeCaches.iosDevices = iosDevices
         
         // Сканируем архивы
+        await progressCallback("Сканирование Xcode архивов...")
         let archivesPath = "\(realHomePath)/Library/Developer/Xcode/Archives"
         let archivesSize = await shellCommand("du -sh \"\(archivesPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
         let archivesInfo = CacheInfo(path: archivesPath, size: archivesSize)
         xcodeCaches.archives = archivesInfo
         
-        // Сканируем отдельные архивы
-        let archiveDirs = await shellCommand("find \"\(archivesPath)\" -name \"*.xcarchive\" -type d 2>/dev/null")
+        // Сканируем отдельные архивы (только если не быстрое сканирование)
         var archiveList: [ArchiveInfo] = []
-        
-        for archivePath in archiveDirs.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
-            let archiveSize = await shellCommand("du -sh \"\(archivePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if !quickScan {
+            let archiveDirs = await shellCommand("find \"\(archivesPath)\" -name \"*.xcarchive\" -type d 2>/dev/null")
             
-            // Читаем Info.plist архива
-            let infoPlistPath = "\(archivePath)/Info.plist"
-            let plistContent = await shellCommand("plutil -p \"\(infoPlistPath)\" 2>/dev/null")
-            
-            if !plistContent.isEmpty {
-                let archiveInfo = parseArchiveInfo(from: plistContent, path: archivePath, size: archiveSize)
-                archiveList.append(archiveInfo)
+            for archivePath in archiveDirs.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
+                let archiveSize = await shellCommand("du -sh \"\(archivePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+                
+                // Читаем Info.plist архива
+                let infoPlistPath = "\(archivePath)/Info.plist"
+                let plistContent = await shellCommand("plutil -p \"\(infoPlistPath)\" 2>/dev/null")
+                
+                if !plistContent.isEmpty {
+                    let archiveInfo = parseArchiveInfo(from: plistContent, path: archivePath, size: archiveSize)
+                    archiveList.append(archiveInfo)
+                }
             }
         }
-        
         xcodeCaches.archiveList = archiveList
         
         // Сканируем проекты DerivedData
+        await progressCallback("Сканирование DerivedData...")
         let derivedDataPath = "\(realHomePath)/Library/Developer/Xcode/DerivedData"
         let derivedDataSize = await shellCommand("du -sh \"\(derivedDataPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
         let derivedDataInfo = CacheInfo(path: derivedDataPath, size: derivedDataSize)
         xcodeCaches.derivedData = derivedDataInfo
         
-        // Сканируем отдельные проекты DerivedData
-        let projectDirs = await shellCommand("ls \"\(derivedDataPath)\" 2>/dev/null")
+        // Сканируем отдельные проекты DerivedData (только если не быстрое сканирование)
         var derivedDataProjects: [DerivedDataProjectInfo] = []
-        
-        for projectDir in projectDirs.components(separatedBy: "\n").filter({ !$0.isEmpty && !$0.contains(".noindex") }) {
-            let projectPath = "\(derivedDataPath)/\(projectDir)"
-            let projectSize = await shellCommand("du -sh \"\(projectPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if !quickScan {
+            let projectDirs = await shellCommand("ls \"\(derivedDataPath)\" 2>/dev/null")
             
-            // Читаем info.plist проекта
-            let infoPlistPath = "\(projectPath)/info.plist"
-            let plistContent = await shellCommand("plutil -p \"\(infoPlistPath)\" 2>/dev/null")
-            
-            if !plistContent.isEmpty {
-                let projectInfo = parseDerivedDataProjectInfo(from: plistContent, path: projectPath, size: projectSize, projectDir: projectDir)
-                derivedDataProjects.append(projectInfo)
+            for projectDir in projectDirs.components(separatedBy: "\n").filter({ !$0.isEmpty && !$0.contains(".noindex") }) {
+                let projectPath = "\(derivedDataPath)/\(projectDir)"
+                let projectSize = await shellCommand("du -sh \"\(projectPath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+                
+                // Читаем info.plist проекта
+                let infoPlistPath = "\(projectPath)/info.plist"
+                let plistContent = await shellCommand("plutil -p \"\(infoPlistPath)\" 2>/dev/null")
+                
+                if !plistContent.isEmpty {
+                    let projectInfo = parseDerivedDataProjectInfo(from: plistContent, path: projectPath, size: projectSize, projectDir: projectDir)
+                    derivedDataProjects.append(projectInfo)
+                }
             }
         }
-        
         xcodeCaches.derivedDataProjects = derivedDataProjects
         
         // Новые папки для macOS 26+
@@ -184,6 +204,115 @@ class CacheService {
         let xcodeTotalSize = calculateXcodeTotalSize(xcodeCaches)
         result.xcodeTotalSize = xcodeTotalSize
         result.xcodeCaches = xcodeCaches
+        
+        // Сканируем кэши разработки (Flutter, Gradle, npm)
+        await progressCallback("Сканирование кэшей разработки...")
+        var developmentCaches = DevelopmentCacheInfo()
+        
+        // Flutter pub cache
+        print("CacheCleaner: Scanning Flutter pub cache...")
+        let pubCachePath = "\(realHomePath)/.pub-cache"
+        let pubCacheSize = await shellCommand("du -sh \"\(pubCachePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        print("CacheCleaner: Flutter pub cache size: \(pubCacheSize)")
+        
+        if pubCacheSize != "0B" {
+            developmentCaches.pubCache = CacheInfo(path: pubCachePath, size: pubCacheSize)
+            
+            // Детальное сканирование Flutter пакетов отключено (слишком медленно для 1600+ пакетов)
+            // Пользователь может удалить всю папку .pub-cache если нужно
+            if false && !quickScan {
+                print("CacheCleaner: Starting detailed Flutter package scan...")
+                await progressCallback("Детальный анализ Flutter пакетов (это может занять время)...")
+                let packagesPath = "\(pubCachePath)/hosted/pub.dev"
+                print("CacheCleaner: Running du command for Flutter packages...")
+                // Оптимизация: сортируем и берём только топ-50 сразу для экономии времени
+                let packagesOutput = await shellCommand("du -sk \"\(packagesPath)\"/*-* 2>/dev/null | sort -rn | head -50")
+                print("CacheCleaner: Flutter packages scan complete, parsing \(packagesOutput.components(separatedBy: "\n").count) lines...")
+                
+                var packageDict: [String: [FlutterPackageVersion]] = [:]
+                
+                for line in packagesOutput.components(separatedBy: "\n").filter({ !$0.isEmpty }) {
+                    let parts = line.components(separatedBy: "\t")
+                    guard parts.count == 2 else { continue }
+                    
+                    let sizeKB = parts[0]
+                    let path = parts[1]
+                    let packageFullName = path.components(separatedBy: "/").last ?? ""
+                    
+                    // Парсим имя пакета и версию (например: "rive_common-0.1.0")
+                    if let lastDashIndex = packageFullName.lastIndex(of: "-") {
+                        let packageName = String(packageFullName[..<lastDashIndex])
+                        let version = String(packageFullName[packageFullName.index(after: lastDashIndex)...])
+                        
+                        let sizeBytes = (Int(sizeKB) ?? 0) * 1024
+                        let size = formatBytes(sizeBytes)
+                        
+                        let packageVersion = FlutterPackageVersion(
+                            packageName: packageName,
+                            version: version,
+                            path: path,
+                            size: size
+                        )
+                        
+                        packageDict[packageName, default: []].append(packageVersion)
+                    }
+                }
+                
+                // Группируем пакеты и сортируем по размеру
+                var packageGroups: [FlutterPackageGroup] = []
+                for (packageName, versions) in packageDict {
+                    let totalBytes = versions.reduce(0) { $0 + (parseSizeToBytes($1.size) ?? 0) }
+                    let totalSize = formatBytes(totalBytes)
+                    
+                    let sortedVersions = versions.sorted { (parseSizeToBytes($0.size) ?? 0) > (parseSizeToBytes($1.size) ?? 0) }
+                    
+                    let group = FlutterPackageGroup(
+                        packageName: packageName,
+                        versions: sortedVersions,
+                        totalSize: totalSize
+                    )
+                    packageGroups.append(group)
+                }
+                
+                // Сортируем группы по общему размеру и берём топ-30
+                developmentCaches.pubPackages = packageGroups.sorted {
+                    (parseSizeToBytes($0.totalSize) ?? 0) > (parseSizeToBytes($1.totalSize) ?? 0)
+                }.prefix(30).map { $0 }
+            }
+        }
+        
+        // Gradle cache
+        let gradleCachePath = "\(realHomePath)/.gradle"
+        let gradleCacheSize = await shellCommand("du -sh \"\(gradleCachePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if gradleCacheSize != "0B" {
+            developmentCaches.gradleCache = CacheInfo(path: gradleCachePath, size: gradleCacheSize)
+        }
+        
+        // npm cache
+        let npmCachePath = "\(realHomePath)/.npm"
+        let npmCacheSize = await shellCommand("du -sh \"\(npmCachePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if npmCacheSize != "0B" {
+            developmentCaches.npmCache = CacheInfo(path: npmCachePath, size: npmCacheSize)
+        }
+        
+        // ~/.cache
+        let homeCachePath = "\(realHomePath)/.cache"
+        let homeCacheSize = await shellCommand("du -sh \"\(homeCachePath)\" 2>/dev/null").components(separatedBy: "\t").first ?? "0B"
+        if homeCacheSize != "0B" {
+            developmentCaches.homeCache = CacheInfo(path: homeCachePath, size: homeCacheSize)
+        }
+        
+        // Рассчитываем общий размер кэшей разработки
+        print("CacheCleaner: Calculating development total size...")
+        let developmentTotalSize = calculateDevelopmentTotalSize(developmentCaches)
+        result.developmentTotalSize = developmentTotalSize
+        result.developmentCaches = developmentCaches
+        
+        print("=== CacheCleaner: Scan complete ===")
+        print("  Total size: \(result.totalSize)")
+        print("  Xcode size: \(result.xcodeTotalSize)")
+        print("  Development size: \(result.developmentTotalSize)")
+        print("  Top caches count: \(result.topCaches.count)")
         
         return result
     }
@@ -228,6 +357,11 @@ class CacheService {
     
     func cleanDerivedDataProject(_ project: DerivedDataProjectInfo) async -> Bool {
         let output = await shellCommand("/bin/rm -rf \"\(project.path)\" 2>/dev/null")
+        return output.isEmpty
+    }
+    
+    func cleanFlutterPackageVersion(_ package: FlutterPackageVersion) async -> Bool {
+        let output = await shellCommand("/bin/rm -rf \"\(package.path)\" 2>/dev/null")
         return output.isEmpty
     }
     
@@ -278,16 +412,62 @@ class CacheService {
         )
     }
     
+    private func calculateDevelopmentTotalSize(_ developmentCaches: DevelopmentCacheInfo) -> String {
+        var totalBytes: Int = 0
+        
+        if let pubCache = developmentCaches.pubCache {
+            totalBytes += parseSizeToBytes(pubCache.size) ?? 0
+        }
+        if let gradleCache = developmentCaches.gradleCache {
+            totalBytes += parseSizeToBytes(gradleCache.size) ?? 0
+        }
+        if let npmCache = developmentCaches.npmCache {
+            totalBytes += parseSizeToBytes(npmCache.size) ?? 0
+        }
+        if let homeCache = developmentCaches.homeCache {
+            totalBytes += parseSizeToBytes(homeCache.size) ?? 0
+        }
+        
+        return formatBytes(totalBytes)
+    }
+    
     private func calculateXcodeTotalSize(_ xcodeCaches: XcodeCacheInfo) -> String {
         var totalBytes: Int = 0
         
-        // Добавляем размеры основных кэшей
-        if let derivedData = xcodeCaches.derivedData {
+        // DerivedData - используем детальные размеры если есть, иначе общий
+        if !xcodeCaches.derivedDataProjects.isEmpty {
+            // Считаем отдельные проекты
+            for project in xcodeCaches.derivedDataProjects {
+                totalBytes += parseSizeToBytes(project.size) ?? 0
+            }
+        } else if let derivedData = xcodeCaches.derivedData {
+            // Иначе считаем всю папку
             totalBytes += parseSizeToBytes(derivedData.size) ?? 0
         }
-        if let archives = xcodeCaches.archives {
+        
+        // iOS Device Support - используем детальные размеры если есть, иначе общий
+        if !xcodeCaches.iosDevices.isEmpty {
+            // Считаем отдельные устройства
+            for device in xcodeCaches.iosDevices {
+                totalBytes += parseSizeToBytes(device.size) ?? 0
+            }
+        } else if let deviceSupport = xcodeCaches.deviceSupport {
+            // Иначе считаем всю папку
+            totalBytes += parseSizeToBytes(deviceSupport.size) ?? 0
+        }
+        
+        // Archives - используем детальные размеры если есть, иначе общий
+        if !xcodeCaches.archiveList.isEmpty {
+            // Считаем отдельные архивы
+            for archive in xcodeCaches.archiveList {
+                totalBytes += parseSizeToBytes(archive.size) ?? 0
+            }
+        } else if let archives = xcodeCaches.archives {
+            // Иначе считаем всю папку
             totalBytes += parseSizeToBytes(archives.size) ?? 0
         }
+        
+        // CoreSimulator - всегда общий размер
         if let simulator = xcodeCaches.simulator {
             totalBytes += parseSizeToBytes(simulator.size) ?? 0
         }
@@ -304,21 +484,6 @@ class CacheService {
         }
         if let xcTestDevices = xcodeCaches.xcTestDevices {
             totalBytes += parseSizeToBytes(xcTestDevices.size) ?? 0
-        }
-        
-        // Добавляем размеры устройств iOS Device Support
-        for device in xcodeCaches.iosDevices {
-            totalBytes += parseSizeToBytes(device.size) ?? 0
-        }
-        
-        // Добавляем размеры архивов
-        for archive in xcodeCaches.archiveList {
-            totalBytes += parseSizeToBytes(archive.size) ?? 0
-        }
-        
-        // Добавляем размеры проектов DerivedData
-        for project in xcodeCaches.derivedDataProjects {
-            totalBytes += parseSizeToBytes(project.size) ?? 0
         }
         
         return formatBytes(totalBytes)

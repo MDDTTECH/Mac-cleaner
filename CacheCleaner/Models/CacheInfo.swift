@@ -5,7 +5,9 @@ struct CacheInfo: Identifiable {
     let path: String
     let size: String
     var displayName: String {
-        path.components(separatedBy: "/").last ?? path
+        // Убираем завершающий слэш если он есть
+        let cleanPath = path.hasSuffix("/") ? String(path.dropLast()) : path
+        return cleanPath.components(separatedBy: "/").last ?? path
     }
 }
 
@@ -97,11 +99,49 @@ struct iOSDeviceInfo: Identifiable {
 struct CacheScanResult {
     var totalSize: String = "0B"
     var xcodeTotalSize: String = "0B"
+    var developmentTotalSize: String = "0B"
     var topCaches: [CacheInfo] = []
     var xcodeCaches: XcodeCacheInfo = .empty
+    var developmentCaches: DevelopmentCacheInfo = .empty
     
     static var empty: CacheScanResult {
         CacheScanResult()
+    }
+}
+
+struct FlutterPackageVersion: Identifiable {
+    let id = UUID()
+    let packageName: String
+    let version: String
+    let path: String
+    let size: String
+    
+    var displayName: String {
+        return "\(packageName) \(version)"
+    }
+}
+
+struct FlutterPackageGroup: Identifiable {
+    let id = UUID()
+    let packageName: String
+    let versions: [FlutterPackageVersion]
+    let totalSize: String
+    
+    var displayName: String {
+        let count = versions.count
+        return "\(packageName) (\(count) \(count == 1 ? "версия" : count < 5 ? "версии" : "версий"))"
+    }
+}
+
+struct DevelopmentCacheInfo {
+    var pubCache: CacheInfo?
+    var pubPackages: [FlutterPackageGroup] = []
+    var gradleCache: CacheInfo?
+    var npmCache: CacheInfo?
+    var homeCache: CacheInfo?
+    
+    static var empty: DevelopmentCacheInfo {
+        DevelopmentCacheInfo()
     }
 }
 
