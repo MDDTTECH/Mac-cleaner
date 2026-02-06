@@ -2,147 +2,254 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = CacheViewModel()
-    /// Глобальный режим множественного выбора для всех разделов
     @State private var isMultiSelectMode = false
+    @State private var showCards = false
+    @State private var hasScanned = false
     
     var body: some View {
-        VStack(spacing: 20) {
-            headerSection
-            
+        ZStack {
             if viewModel.isScanning {
-                VStack(spacing: 20) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    
-                    Text(viewModel.scanningProgress)
-                        .font(.headline)
-                        .foregroundColor(.blue)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScanningAnimationView(progressText: viewModel.scanningProgress)
+                    .transition(.opacity)
             } else if viewModel.isCleaning {
-                cleaningProgressSection
-            } else {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Блок 1: Общие кэши
-                        VStack(alignment: .leading, spacing: 10) {
-                            totalSizeSection
-                            topCachesSection
-                        }
-                        
-                        Divider()
-                        
-                        // Блок 2: Xcode кэши
-                        VStack(alignment: .leading, spacing: 10) {
-                            xcodeTotalSizeSection
-                            xcodeCachesSection
-                        }
-                        
-                        Divider()
-                        
-                        // Блок 3: Кэши разработки
-                        VStack(alignment: .leading, spacing: 10) {
-                            developmentTotalSizeSection
-                            developmentCachesSection
-                        }
-                        
-                        if viewModel.isQuickScan {
-                            Divider()
-                            quickScanInfoSection
-                        }
-                    }
-                    .padding()
-                }
+                CleaningProgressView(
+                    cacheName: viewModel.cleaningCacheName,
+                    progressText: viewModel.cleaningProgress
+                )
+                .transition(.opacity)
+            } else if hasScanned {
+                mainContent
+                    .transition(.opacity)
             }
         }
-        .padding()
-        .frame(minWidth: 600, minHeight: 800)
-        .confirmationDialog(
-            "Очистить кэш?",
-            isPresented: $viewModel.showingConfirmation,
-            presenting: viewModel.selectedCache
-        ) { cache in
-            Button("Очистить \(cache.displayName)") {
-                Task {
-                    await viewModel.cleanCache(cache)
-                }
+        .animation(.easeInOut(duration: 0.3), value: viewModel.isScanning)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.isCleaning)
+        .frame(minWidth: 680, minHeight: 700)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .confirmationDialogs(viewModel: viewModel)
+        .task {
+            // Auto-scan on first launch
+            if !hasScanned {
+                await viewModel.scanCaches()
+                hasScanned = true
             }
-            Button("Отмена", role: .cancel) {}
-        } message: { cache in
-            Text("Вы уверены, что хотите очистить \(cache.displayName)?")
-        }
-        .confirmationDialog(
-            "Удалить символы устройства?",
-            isPresented: $viewModel.showingDeviceConfirmation,
-            presenting: viewModel.selectedDevice
-        ) { device in
-            Button("Удалить \(device.displayName)") {
-                Task {
-                    await viewModel.cleaniOSDevice(device)
-                }
-            }
-            Button("Отмена", role: .cancel) {}
-        } message: { device in
-            Text("Вы уверены, что хотите удалить символы отладки для \(device.detailedDescription)?\n\nРазмер: \(device.size)\n\nСимволы будут перезагружены при следующем подключении устройства.")
-        }
-        .confirmationDialog(
-            "Удалить архив?",
-            isPresented: $viewModel.showingArchiveConfirmation,
-            presenting: viewModel.selectedArchive
-        ) { archive in
-            Button("Удалить \(archive.displayName)") {
-                Task {
-                    await viewModel.cleanArchive(archive)
-                }
-            }
-            Button("Отмена", role: .cancel) {}
-        } message: { archive in
-            Text("Вы уверены, что хотите удалить архив \(archive.detailedDescription)?\n\nРазмер: \(archive.size)")
-        }
-        .confirmationDialog(
-            "Удалить проект DerivedData?",
-            isPresented: $viewModel.showingDerivedDataConfirmation,
-            presenting: viewModel.selectedDerivedDataProject
-        ) { project in
-            Button("Удалить \(project.displayName)") {
-                Task {
-                    await viewModel.cleanDerivedDataProject(project)
-                }
-            }
-            Button("Отмена", role: .cancel) {}
-        } message: { project in
-            Text("Вы уверены, что хотите удалить кэш сборки для проекта \(project.detailedDescription)?\n\nРазмер: \(project.size)\n\nПроект будет пересобран при следующем открытии в Xcode.")
-        }
-        .confirmationDialog(
-            "Удалить Flutter пакет?",
-            isPresented: $viewModel.showingFlutterPackageConfirmation,
-            presenting: viewModel.selectedFlutterPackage
-        ) { package in
-            Button("Удалить \(package.displayName)") {
-                Task {
-                    await viewModel.cleanFlutterPackageVersion(package)
-                }
-            }
-            Button("Отмена", role: .cancel) {}
-        } message: { package in
-            Text("Вы уверены, что хотите удалить Flutter пакет \(package.displayName)?\n\nРазмер: \(package.size)\n\nПакет будет скачан при следующем запуске flutter pub get.")
         }
     }
     
-    private var headerSection: some View {
+    // MARK: - Main Content
+    
+    private var mainContent: some View {
+        ScrollView {
+            VStack(spacing: AppTheme.Spacing.xl) {
+                HeroSection(
+                    viewModel: viewModel,
+                    isMultiSelectMode: $isMultiSelectMode
+                )
+                .padding(.top, AppTheme.Spacing.sm)
+                
+                GeneralCachesCard(
+                    viewModel: viewModel,
+                    isMultiSelectMode: isMultiSelectMode
+                )
+                .offset(y: showCards ? 0 : 20)
+                .opacity(showCards ? 1 : 0)
+                .animation(.easeOut(duration: 0.5), value: showCards)
+                
+                XcodeCachesCard(
+                    viewModel: viewModel,
+                    isMultiSelectMode: isMultiSelectMode
+                )
+                .offset(y: showCards ? 0 : 20)
+                .opacity(showCards ? 1 : 0)
+                .animation(.easeOut(duration: 0.5).delay(0.1), value: showCards)
+                
+                DevelopmentCachesCard(
+                    viewModel: viewModel,
+                    isMultiSelectMode: isMultiSelectMode
+                )
+                .offset(y: showCards ? 0 : 20)
+                .opacity(showCards ? 1 : 0)
+                .animation(.easeOut(duration: 0.5).delay(0.2), value: showCards)
+                
+                if viewModel.isQuickScan {
+                    QuickScanBanner(viewModel: viewModel)
+                        .offset(y: showCards ? 0 : 20)
+                        .opacity(showCards ? 1 : 0)
+                        .animation(.easeOut(duration: 0.5).delay(0.3), value: showCards)
+                }
+            }
+            .padding(.horizontal, AppTheme.Spacing.xl)
+            .padding(.bottom, AppTheme.Spacing.xl)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.5)) {
+                showCards = true
+            }
+        }
+        .onChange(of: viewModel.isScanning) { _, newValue in
+            if newValue {
+                showCards = false
+            } else {
+                hasScanned = true
+                withAnimation(.easeOut(duration: 0.5)) {
+                    showCards = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Confirmation Dialogs
+
+private extension View {
+    func confirmationDialogs(viewModel: CacheViewModel) -> some View {
+        self
+            .confirmationDialog(
+                "Очистить кэш?",
+                isPresented: Binding(
+                    get: { viewModel.showingConfirmation },
+                    set: { viewModel.showingConfirmation = $0 }
+                ),
+                presenting: viewModel.selectedCache
+            ) { cache in
+                Button("Очистить \(cache.displayName)") {
+                    Task { await viewModel.cleanCache(cache) }
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: { cache in
+                Text("Вы уверены, что хотите очистить \(cache.displayName)?")
+            }
+            .confirmationDialog(
+                "Удалить символы устройства?",
+                isPresented: Binding(
+                    get: { viewModel.showingDeviceConfirmation },
+                    set: { viewModel.showingDeviceConfirmation = $0 }
+                ),
+                presenting: viewModel.selectedDevice
+            ) { device in
+                Button("Удалить \(device.displayName)") {
+                    Task { await viewModel.cleaniOSDevice(device) }
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: { device in
+                Text("Удалить символы для \(device.detailedDescription)?\nРазмер: \(device.size)")
+            }
+            .confirmationDialog(
+                "Удалить архив?",
+                isPresented: Binding(
+                    get: { viewModel.showingArchiveConfirmation },
+                    set: { viewModel.showingArchiveConfirmation = $0 }
+                ),
+                presenting: viewModel.selectedArchive
+            ) { archive in
+                Button("Удалить \(archive.displayName)") {
+                    Task { await viewModel.cleanArchive(archive) }
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: { archive in
+                Text("Удалить архив \(archive.detailedDescription)?\nРазмер: \(archive.size)")
+            }
+            .confirmationDialog(
+                "Удалить проект DerivedData?",
+                isPresented: Binding(
+                    get: { viewModel.showingDerivedDataConfirmation },
+                    set: { viewModel.showingDerivedDataConfirmation = $0 }
+                ),
+                presenting: viewModel.selectedDerivedDataProject
+            ) { project in
+                Button("Удалить \(project.displayName)") {
+                    Task { await viewModel.cleanDerivedDataProject(project) }
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: { project in
+                Text("Удалить кэш сборки \(project.detailedDescription)?\nРазмер: \(project.size)")
+            }
+            .confirmationDialog(
+                "Удалить Flutter пакет?",
+                isPresented: Binding(
+                    get: { viewModel.showingFlutterPackageConfirmation },
+                    set: { viewModel.showingFlutterPackageConfirmation = $0 }
+                ),
+                presenting: viewModel.selectedFlutterPackage
+            ) { package in
+                Button("Удалить \(package.displayName)") {
+                    Task { await viewModel.cleanFlutterPackageVersion(package) }
+                }
+                Button("Отмена", role: .cancel) {}
+            } message: { package in
+                Text("Удалить Flutter пакет \(package.displayName)?\nРазмер: \(package.size)")
+            }
+    }
+}
+
+// MARK: - Hero Section
+
+struct HeroSection: View {
+    @ObservedObject var viewModel: CacheViewModel
+    @Binding var isMultiSelectMode: Bool
+    
+    var body: some View {
+        VStack(spacing: AppTheme.Spacing.lg) {
+            titleBar
+            gaugeAndStats
+        }
+    }
+    
+    private var titleBar: some View {
         HStack {
             Text("Cache Cleaner")
-                .font(.title2)
-                .bold()
+                .font(.system(.title2, design: .rounded, weight: .bold))
             
             Spacer()
             
-            // Кнопка переключения режима множественного выбора
+            actionButtons
+        }
+    }
+    
+    private var gaugeAndStats: some View {
+        HStack(spacing: AppTheme.Spacing.xxxl) {
+            RingGaugeView(
+                generalSize: viewModel.scanResult.totalSize,
+                xcodeSize: viewModel.scanResult.xcodeTotalSize,
+                devSize: viewModel.scanResult.developmentTotalSize,
+                grandTotal: viewModel.scanResult.grandTotalSize,
+                isScanning: viewModel.isScanning,
+                scanningText: viewModel.scanningProgress
+            )
+            
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                StatBadgeView(
+                    icon: "folder.fill",
+                    title: String(localized: "category.general", defaultValue: "Общие кэши"),
+                    size: viewModel.scanResult.totalSize,
+                    gradient: AppTheme.Gradient.general,
+                    color: AppTheme.Category.general
+                )
+                StatBadgeView(
+                    icon: "hammer.fill",
+                    title: "Xcode",
+                    size: viewModel.scanResult.xcodeTotalSize,
+                    gradient: AppTheme.Gradient.xcode,
+                    color: AppTheme.Category.xcode
+                )
+                StatBadgeView(
+                    icon: "chevron.left.forwardslash.chevron.right",
+                    title: String(localized: "category.dev", defaultValue: "Разработка"),
+                    size: viewModel.scanResult.developmentTotalSize,
+                    gradient: AppTheme.Gradient.development,
+                    color: AppTheme.Category.development
+                )
+            }
+        }
+        .padding(.vertical, AppTheme.Spacing.sm)
+    }
+    
+    private var actionButtons: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
             Button {
-                withAnimation {
+                withAnimation(.easeInOut(duration: 0.2)) {
                     isMultiSelectMode.toggle()
                     if !isMultiSelectMode {
-                        // Снимаем выбор со всех элементов
                         viewModel.selectedCacheInfos.removeAll()
                         viewModel.selectedDerivedDataProjects.removeAll()
                         viewModel.selectediOSDevices.removeAll()
@@ -150,1022 +257,527 @@ struct ContentView: View {
                     }
                 }
             } label: {
-                Label(
-                    isMultiSelectMode ? "Обычный режим" : "Выбрать несколько",
-                    systemImage: isMultiSelectMode ? "checkmark.circle.fill" : "checkmark.circle"
-                )
+                Image(systemName: isMultiSelectMode ? "checkmark.circle.fill" : "checkmark.circle")
+                    .font(.system(size: 16))
+            }
+            .buttonStyle(.bordered)
+            .tint(isMultiSelectMode ? AppTheme.Category.general : nil)
+            .disabled(viewModel.isScanning || viewModel.isCleaning)
+            .help(String(localized: "button.multiSelect", defaultValue: "Выбрать несколько"))
+            
+            if isMultiSelectMode && viewModel.hasAnySelection {
+                Button {
+                    Task { await viewModel.cleanSelected() }
+                } label: {
+                    Label(
+                        String(localized: "button.deleteSelected", defaultValue: "Удалить"),
+                        systemImage: "trash.fill"
+                    )
+                    .font(.system(size: 13))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.Category.destructive)
+                .transition(.scale.combined(with: .opacity))
+            }
+            
+            Button {
+                Task { await viewModel.scanCaches() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .medium))
             }
             .buttonStyle(.bordered)
             .disabled(viewModel.isScanning || viewModel.isCleaning)
-            
-            // Одна общая кнопка удаления для всего выбранного
-            Button {
-                Task {
-                    await viewModel.cleanSelected()
-                }
-            } label: {
-                Label("Удалить выбранные", systemImage: "trash.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
-            .disabled(!isMultiSelectMode || !viewModel.hasAnySelection || viewModel.isScanning || viewModel.isCleaning)
-            
-            Button(action: {
-                Task {
-                    await viewModel.scanCaches()
-                }
-            }) {
-                Label("Сканировать", systemImage: "arrow.clockwise")
-            }
-            .disabled(viewModel.isScanning || viewModel.isCleaning)
+            .help(String(localized: "button.scan", defaultValue: "Сканировать"))
         }
     }
+}
+
+// MARK: - General Caches Card
+
+struct GeneralCachesCard: View {
+    @ObservedObject var viewModel: CacheViewModel
+    let isMultiSelectMode: Bool
     
-    private var cleaningProgressSection: some View {
-        VStack(spacing: 20) {
-            ProgressView()
-                .scaleEffect(1.5)
+    private var hasData: Bool {
+        !viewModel.scanResult.topCaches.isEmpty
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader(
+                icon: "folder.fill",
+                title: String(localized: "section.topCaches", defaultValue: "Топ кэшей"),
+                subtitle: String(localized: "section.topCaches.subtitle", defaultValue: "Самые большие папки в ~/Library/Caches"),
+                size: viewModel.scanResult.totalSize,
+                color: AppTheme.Category.general
+            )
             
-            VStack(spacing: 8) {
-                Text("Очистка кэша")
-                    .font(.headline)
+            if hasData {
+                cacheList
+            } else {
+                Text(String(localized: "section.topCaches.empty", defaultValue: "Кэши не найдены"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, AppTheme.Spacing.md)
+            }
+        }
+        .glassCard(accent: AppTheme.Category.general)
+    }
+    
+    private var cacheList: some View {
+        let topCaches = viewModel.scanResult.topCaches
+        let maxSize = SizeHelper.maxSizeBytes(topCaches.map(\.size))
+        
+        return ForEach(Array(topCaches.enumerated()), id: \.element.id) { index, cache in
+            VStack(spacing: 0) {
+                CacheItemRow.fromCache(
+                    cache,
+                    sizeBytes: SizeHelper.parseSizeToBytes(cache.size),
+                    maxSizeBytes: maxSize,
+                    accentColor: AppTheme.Category.general,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectedCacheInfos.contains(cache.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(cache.id, in: &viewModel.selectedCacheInfos) },
+                    onDelete: {
+                        viewModel.selectedCache = cache
+                        viewModel.showingConfirmation = true
+                    }
+                )
                 
-                if !viewModel.cleaningCacheName.isEmpty {
-                    Text(viewModel.cleaningCacheName)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                Text(viewModel.cleaningProgress)
-                    .font(.body)
-                    .foregroundColor(.blue)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    
-    private var totalSizeSection: some View {
-        VStack(alignment: .leading) {
-            Text("Общий размер кэшей")
-                .font(.headline)
-            Text(viewModel.scanResult.totalSize)
-                .font(.title2)
-                .foregroundColor(.blue)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    private var xcodeTotalSizeSection: some View {
-        VStack(alignment: .leading) {
-            Text("Размер кэшей Xcode")
-                .font(.headline)
-            Text(viewModel.scanResult.xcodeTotalSize)
-                .font(.title2)
-                .foregroundColor(.orange)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    private var developmentTotalSizeSection: some View {
-        VStack(alignment: .leading) {
-            Text("Размер кэшей разработки (Flutter, Gradle, npm)")
-                .font(.headline)
-            Text(viewModel.scanResult.developmentTotalSize)
-                .font(.title2)
-                .foregroundColor(.green)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    private var quickScanInfoSection: some View {
-        HStack {
-            Image(systemName: "info.circle.fill")
-                .foregroundColor(.blue)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Быстрое сканирование")
-                    .font(.headline)
-                Text("Детальная информация о Xcode проектах и архивах скрыта для ускорения")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Button("Полное сканирование") {
-                Task {
-                    await viewModel.scanCaches(quick: false)
+                if index < topCaches.count - 1 {
+                    Divider().padding(.horizontal, AppTheme.Spacing.sm)
                 }
             }
-            .disabled(viewModel.isScanning || viewModel.isCleaning)
         }
-        .padding()
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(10)
+    }
+}
+
+// MARK: - Xcode Caches Card
+
+struct XcodeCachesCard: View {
+    @ObservedObject var viewModel: CacheViewModel
+    let isMultiSelectMode: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader(
+                icon: "hammer.fill",
+                title: String(localized: "section.xcode", defaultValue: "Xcode"),
+                subtitle: String(localized: "section.xcode.subtitle", defaultValue: "DerivedData, архивы, симуляторы"),
+                size: viewModel.scanResult.xcodeTotalSize,
+                color: AppTheme.Category.xcode
+            )
+            
+            derivedDataSection
+            deviceSupportSection
+            archivesSection
+            simpleItemsSection
+        }
+        .glassCard(accent: AppTheme.Category.xcode)
     }
     
-    private var topCachesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !viewModel.scanResult.topCaches.isEmpty {
+    @ViewBuilder
+    private var derivedDataSection: some View {
+        if let derivedData = viewModel.scanResult.xcodeCaches.derivedData {
+            let projects = viewModel.scanResult.xcodeCaches.derivedDataProjects
+            Divider().padding(.horizontal, AppTheme.Spacing.sm)
+            
+            if !projects.isEmpty {
                 DisclosureGroup {
-                    VStack(spacing: 6) {
-                        ForEach(viewModel.scanResult.topCaches) { cache in
-                            if isMultiSelectMode {
-                                TopCacheSelectableRowView(
-                                    cache: cache,
-                                    isDisabled: viewModel.isCleaning,
-                                    isSelected: viewModel.selectedCacheInfos.contains(cache.id),
-                                    onToggleSelection: {
-                                        if viewModel.selectedCacheInfos.contains(cache.id) {
-                                            viewModel.selectedCacheInfos.remove(cache.id)
-                                        } else {
-                                            viewModel.selectedCacheInfos.insert(cache.id)
-                                        }
-                                    },
-                                    onClean: {
-                                        viewModel.selectedCache = cache
-                                        viewModel.showingConfirmation = true
-                                    }
-                                )
-                            } else {
-                                CacheRowView(cache: cache, isDisabled: viewModel.isCleaning) {
-                                    viewModel.selectedCache = cache
-                                    viewModel.showingConfirmation = true
-                                }
-                            }
-                        }
-                    }
-                    .padding(.top, 4)
+                    derivedDataProjectsList(projects)
                 } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Топ 10 самых больших папок")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            if isMultiSelectMode {
-                                Text("Нажмите на чекбоксы, чтобы выбрать несколько папок для удаления")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        Spacer()
-                        Image(systemName: "folder.fill")
-                            .foregroundColor(.blue)
+                    XcodeItemLabel(
+                        cache: derivedData,
+                        description: String(localized: "xcode.derivedData", defaultValue: "кэш сборки"),
+                        isMultiSelectMode: isMultiSelectMode,
+                        isSelected: viewModel.selectedCacheInfos.contains(derivedData.id),
+                        isCleaning: viewModel.isCleaning,
+                        onToggleSelection: { toggleSelection(derivedData.id, in: &viewModel.selectedCacheInfos) },
+                        onDelete: { showClean(derivedData) }
+                    )
+                }
+                .padding(.horizontal, AppTheme.Spacing.sm)
+                .padding(.vertical, AppTheme.Spacing.xs)
+            } else {
+                CacheItemRow.fromCache(
+                    derivedData,
+                    description: String(localized: "xcode.derivedData", defaultValue: "кэш сборки"),
+                    accentColor: AppTheme.Category.xcode,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectedCacheInfos.contains(derivedData.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(derivedData.id, in: &viewModel.selectedCacheInfos) },
+                    onDelete: { showClean(derivedData) }
+                )
+            }
+        }
+    }
+    
+    private func derivedDataProjectsList(_ projects: [DerivedDataProjectInfo]) -> some View {
+        let maxSize = SizeHelper.maxSizeBytes(projects.map(\.size))
+        return VStack(spacing: 0) {
+            ForEach(Array(projects.enumerated()), id: \.element.id) { index, project in
+                CacheItemRow.fromProject(
+                    project,
+                    sizeBytes: SizeHelper.parseSizeToBytes(project.size),
+                    maxSizeBytes: maxSize,
+                    accentColor: AppTheme.Category.xcode,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectedDerivedDataProjects.contains(project.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(project.id, in: &viewModel.selectedDerivedDataProjects) },
+                    onDelete: {
+                        viewModel.selectedDerivedDataProject = project
+                        viewModel.showingDerivedDataConfirmation = true
                     }
+                )
+                if index < projects.count - 1 {
+                    Divider().padding(.horizontal, AppTheme.Spacing.sm)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, AppTheme.Spacing.xs)
     }
     
-    private func cacheHeaderLabel(cache: CacheInfo, description: String) -> some View {
+    @ViewBuilder
+    private var deviceSupportSection: some View {
+        if let deviceSupport = viewModel.scanResult.xcodeCaches.deviceSupport {
+            let devices = viewModel.scanResult.xcodeCaches.iosDevices
+            Divider().padding(.horizontal, AppTheme.Spacing.sm)
+            
+            if !devices.isEmpty {
+                DisclosureGroup {
+                    devicesList(devices)
+                } label: {
+                    XcodeItemLabel(
+                        cache: deviceSupport,
+                        description: String(localized: "xcode.deviceSupport", defaultValue: "символы отладки"),
+                        isMultiSelectMode: isMultiSelectMode,
+                        isSelected: viewModel.selectedCacheInfos.contains(deviceSupport.id),
+                        isCleaning: viewModel.isCleaning,
+                        onToggleSelection: { toggleSelection(deviceSupport.id, in: &viewModel.selectedCacheInfos) },
+                        onDelete: { showClean(deviceSupport) }
+                    )
+                }
+                .padding(.horizontal, AppTheme.Spacing.sm)
+                .padding(.vertical, AppTheme.Spacing.xs)
+            } else {
+                CacheItemRow.fromCache(
+                    deviceSupport,
+                    description: String(localized: "xcode.deviceSupport", defaultValue: "символы отладки"),
+                    accentColor: AppTheme.Category.xcode,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectedCacheInfos.contains(deviceSupport.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(deviceSupport.id, in: &viewModel.selectedCacheInfos) },
+                    onDelete: { showClean(deviceSupport) }
+                )
+            }
+        }
+    }
+    
+    private func devicesList(_ devices: [iOSDeviceInfo]) -> some View {
+        let maxSize = SizeHelper.maxSizeBytes(devices.map(\.size))
+        return VStack(spacing: 0) {
+            ForEach(Array(devices.enumerated()), id: \.element.id) { index, device in
+                CacheItemRow.fromDevice(
+                    device,
+                    sizeBytes: SizeHelper.parseSizeToBytes(device.size),
+                    maxSizeBytes: maxSize,
+                    accentColor: AppTheme.Category.xcode,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectediOSDevices.contains(device.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(device.id, in: &viewModel.selectediOSDevices) },
+                    onDelete: {
+                        viewModel.selectedDevice = device
+                        viewModel.showingDeviceConfirmation = true
+                    }
+                )
+                if index < devices.count - 1 {
+                    Divider().padding(.horizontal, AppTheme.Spacing.sm)
+                }
+            }
+        }
+        .padding(.top, AppTheme.Spacing.xs)
+    }
+    
+    @ViewBuilder
+    private var archivesSection: some View {
+        if let archives = viewModel.scanResult.xcodeCaches.archives {
+            let archiveList = viewModel.scanResult.xcodeCaches.archiveList
+            Divider().padding(.horizontal, AppTheme.Spacing.sm)
+            
+            if !archiveList.isEmpty {
+                DisclosureGroup {
+                    archivesList(archiveList)
+                } label: {
+                    XcodeItemLabel(
+                        cache: archives,
+                        description: String(localized: "xcode.archives", defaultValue: "архивы приложений"),
+                        isMultiSelectMode: isMultiSelectMode,
+                        isSelected: viewModel.selectedCacheInfos.contains(archives.id),
+                        isCleaning: viewModel.isCleaning,
+                        onToggleSelection: { toggleSelection(archives.id, in: &viewModel.selectedCacheInfos) },
+                        onDelete: { showClean(archives) }
+                    )
+                }
+                .padding(.horizontal, AppTheme.Spacing.sm)
+                .padding(.vertical, AppTheme.Spacing.xs)
+            } else {
+                CacheItemRow.fromCache(
+                    archives,
+                    description: String(localized: "xcode.archives", defaultValue: "архивы приложений"),
+                    accentColor: AppTheme.Category.xcode,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectedCacheInfos.contains(archives.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(archives.id, in: &viewModel.selectedCacheInfos) },
+                    onDelete: { showClean(archives) }
+                )
+            }
+        }
+    }
+    
+    private func archivesList(_ archives: [ArchiveInfo]) -> some View {
+        let maxSize = SizeHelper.maxSizeBytes(archives.map(\.size))
+        return VStack(spacing: 0) {
+            ForEach(Array(archives.enumerated()), id: \.element.id) { index, archive in
+                CacheItemRow.fromArchive(
+                    archive,
+                    sizeBytes: SizeHelper.parseSizeToBytes(archive.size),
+                    maxSizeBytes: maxSize,
+                    accentColor: AppTheme.Category.xcode,
+                    isMultiSelectMode: isMultiSelectMode,
+                    isSelected: viewModel.selectedArchives.contains(archive.id),
+                    isDisabled: viewModel.isCleaning,
+                    onToggleSelection: { toggleSelection(archive.id, in: &viewModel.selectedArchives) },
+                    onDelete: {
+                        viewModel.selectedArchive = archive
+                        viewModel.showingArchiveConfirmation = true
+                    }
+                )
+                if index < archives.count - 1 {
+                    Divider().padding(.horizontal, AppTheme.Spacing.sm)
+                }
+            }
+        }
+        .padding(.top, AppTheme.Spacing.xs)
+    }
+    
+    @ViewBuilder
+    private var simpleItemsSection: some View {
+        let xc = viewModel.scanResult.xcodeCaches
+        
+        simpleXcodeItem(xc.simulator, String(localized: "xcode.simulator", defaultValue: "кэши симуляторов"))
+        simpleXcodeItem(xc.developerDiskImages, String(localized: "xcode.diskImages", defaultValue: "образы для разработки"))
+        simpleXcodeItem(xc.xcpgDevices, String(localized: "xcode.xcpgDevices", defaultValue: "данные устройств"))
+        simpleXcodeItem(xc.dvtDownloads, String(localized: "xcode.dvtDownloads", defaultValue: "загрузки и инструменты"))
+        simpleXcodeItem(xc.xcTestDevices, String(localized: "xcode.testDevices", defaultValue: "данные тестирования"))
+    }
+    
+    @ViewBuilder
+    private func simpleXcodeItem(_ cache: CacheInfo?, _ description: String) -> some View {
+        if let cache {
+            Divider().padding(.horizontal, AppTheme.Spacing.sm)
+            CacheItemRow.fromCache(
+                cache,
+                description: description,
+                accentColor: AppTheme.Category.xcode,
+                isMultiSelectMode: isMultiSelectMode,
+                isSelected: viewModel.selectedCacheInfos.contains(cache.id),
+                isDisabled: viewModel.isCleaning,
+                onToggleSelection: { toggleSelection(cache.id, in: &viewModel.selectedCacheInfos) },
+                onDelete: { showClean(cache) }
+            )
+        }
+    }
+    
+    private func showClean(_ cache: CacheInfo) {
+        viewModel.selectedCache = cache
+        viewModel.showingConfirmation = true
+    }
+}
+
+// MARK: - Xcode Item Label (for DisclosureGroup)
+
+struct XcodeItemLabel: View {
+    let cache: CacheInfo
+    let description: String
+    let isMultiSelectMode: Bool
+    let isSelected: Bool
+    let isCleaning: Bool
+    let onToggleSelection: () -> Void
+    let onDelete: () -> Void
+    
+    var body: some View {
         HStack {
+            if isMultiSelectMode {
+                Button(action: onToggleSelection) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(isSelected ? AppTheme.Category.xcode : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            
             VStack(alignment: .leading, spacing: 2) {
                 Text(cache.displayName)
-                    .font(.body)
-                    .fontWeight(.medium)
+                    .font(.system(.body, weight: .medium))
                 Text(description)
                     .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            Text(cache.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.orange)
-            Button(action: {
-                viewModel.selectedCache = cache
-                viewModel.showingConfirmation = true
-            }) {
-                Image(systemName: "trash")
-                    .foregroundColor(viewModel.isCleaning ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isCleaning)
-        }
-    }
-    
-    private var xcodeCachesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // DerivedData с раскрывающимся списком проектов
-            if let derivedData = viewModel.scanResult.xcodeCaches.derivedData {
-                if !viewModel.scanResult.xcodeCaches.derivedDataProjects.isEmpty {
-                    // Полное сканирование - показываем проекты
-                    DisclosureGroup {
-                        VStack(spacing: 6) {
-                            ForEach(viewModel.scanResult.xcodeCaches.derivedDataProjects) { project in
-                                if isMultiSelectMode {
-                                    DerivedDataProjectSelectableRowView(
-                                        project: project,
-                                        isDisabled: viewModel.isCleaning,
-                                        isSelected: viewModel.selectedDerivedDataProjects.contains(project.id),
-                                        onToggleSelection: {
-                                            if viewModel.selectedDerivedDataProjects.contains(project.id) {
-                                                viewModel.selectedDerivedDataProjects.remove(project.id)
-                                            } else {
-                                                viewModel.selectedDerivedDataProjects.insert(project.id)
-                                            }
-                                        },
-                                        onClean: {
-                                            viewModel.selectedDerivedDataProject = project
-                                            viewModel.showingDerivedDataConfirmation = true
-                                        }
-                                    )
-                                } else {
-                                    DerivedDataProjectRowView(project: project, isDisabled: viewModel.isCleaning) {
-                                        viewModel.selectedDerivedDataProject = project
-                                        viewModel.showingDerivedDataConfirmation = true
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.top, 4)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(derivedData.displayName)
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                                Text("кэш сборки")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                if isMultiSelectMode {
-                                    Text("Нажмите на чекбоксы, чтобы выбрать несколько проектов")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(derivedData.size)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.orange)
-                            
-                            Button(action: {
-                                viewModel.selectedCache = derivedData
-                                viewModel.showingConfirmation = true
-                            }) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(viewModel.isCleaning ? .gray : .red)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(viewModel.isCleaning)
-                        }
-                    }
-                } else {
-                    // Быстрое сканирование - только размер
-                    CacheRowView(cache: derivedData, description: "кэш сборки", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = derivedData
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            // iOS Device Support с раскрывающимся списком устройств
-            if let deviceSupport = viewModel.scanResult.xcodeCaches.deviceSupport {
-                if !viewModel.scanResult.xcodeCaches.iosDevices.isEmpty {
-                    // Полное сканирование - показываем устройства
-                    DisclosureGroup {
-                        VStack(spacing: 6) {
-                            ForEach(viewModel.scanResult.xcodeCaches.iosDevices) { device in
-                                if isMultiSelectMode {
-                                    iOSDeviceSelectableRowView(
-                                        device: device,
-                                        isDisabled: viewModel.isCleaning,
-                                        isSelected: viewModel.selectediOSDevices.contains(device.id),
-                                        onToggleSelection: {
-                                            if viewModel.selectediOSDevices.contains(device.id) {
-                                                viewModel.selectediOSDevices.remove(device.id)
-                                            } else {
-                                                viewModel.selectediOSDevices.insert(device.id)
-                                            }
-                                        },
-                                        onClean: {
-                                            viewModel.selectedDevice = device
-                                            viewModel.showingDeviceConfirmation = true
-                                        }
-                                    )
-                                } else {
-                                    iOSDeviceRowView(device: device, isDisabled: viewModel.isCleaning) {
-                                        viewModel.selectedDevice = device
-                                        viewModel.showingDeviceConfirmation = true
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.top, 4)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(deviceSupport.displayName)
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                                Text("символы отладки")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                if isMultiSelectMode {
-                                    Text("Нажмите на чекбоксы, чтобы выбрать несколько устройств")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(deviceSupport.size)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.orange)
-                            
-                            Button(action: {
-                                viewModel.selectedCache = deviceSupport
-                                viewModel.showingConfirmation = true
-                            }) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(viewModel.isCleaning ? .gray : .red)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(viewModel.isCleaning)
-                        }
-                    }
-                } else {
-                    // Быстрое сканирование - только размер
-                    CacheRowView(cache: deviceSupport, description: "символы отладки", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = deviceSupport
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            // Archives с раскрывающимся списком архивов
-            if let archives = viewModel.scanResult.xcodeCaches.archives {
-                if !viewModel.scanResult.xcodeCaches.archiveList.isEmpty {
-                    // Полное сканирование - показываем архивы
-                    DisclosureGroup {
-                        VStack(spacing: 6) {
-                            ForEach(viewModel.scanResult.xcodeCaches.archiveList) { archive in
-                                if isMultiSelectMode {
-                                    ArchiveSelectableRowView(
-                                        archive: archive,
-                                        isDisabled: viewModel.isCleaning,
-                                        isSelected: viewModel.selectedArchives.contains(archive.id),
-                                        onToggleSelection: {
-                                            if viewModel.selectedArchives.contains(archive.id) {
-                                                viewModel.selectedArchives.remove(archive.id)
-                                            } else {
-                                                viewModel.selectedArchives.insert(archive.id)
-                                            }
-                                        },
-                                        onClean: {
-                                            viewModel.selectedArchive = archive
-                                            viewModel.showingArchiveConfirmation = true
-                                        }
-                                    )
-                                } else {
-                                    ArchiveRowView(archive: archive, isDisabled: viewModel.isCleaning) {
-                                        viewModel.selectedArchive = archive
-                                        viewModel.showingArchiveConfirmation = true
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.top, 4)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(archives.displayName)
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                                Text("архивы приложений")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                if isMultiSelectMode {
-                                    Text("Нажмите на чекбоксы, чтобы выбрать несколько архивов")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(archives.size)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.orange)
-                            
-                            Button(action: {
-                                viewModel.selectedCache = archives
-                                viewModel.showingConfirmation = true
-                            }) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(viewModel.isCleaning ? .gray : .red)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(viewModel.isCleaning)
-                        }
-                    }
-                } else {
-                    // Быстрое сканирование - только размер
-                    CacheRowView(cache: archives, description: "архивы приложений", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = archives
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            if let simulator = viewModel.scanResult.xcodeCaches.simulator {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: simulator,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(simulator.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(simulator.id) {
-                                viewModel.selectedCacheInfos.remove(simulator.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(simulator.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = simulator
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: simulator, description: "кэши симуляторов", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = simulator
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            // Новые кэши для macOS 26+
-            if let developerDiskImages = viewModel.scanResult.xcodeCaches.developerDiskImages {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: developerDiskImages,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(developerDiskImages.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(developerDiskImages.id) {
-                                viewModel.selectedCacheInfos.remove(developerDiskImages.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(developerDiskImages.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = developerDiskImages
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: developerDiskImages, description: "образы для разработки", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = developerDiskImages
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            if let xcpgDevices = viewModel.scanResult.xcodeCaches.xcpgDevices {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: xcpgDevices,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(xcpgDevices.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(xcpgDevices.id) {
-                                viewModel.selectedCacheInfos.remove(xcpgDevices.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(xcpgDevices.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = xcpgDevices
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: xcpgDevices, description: "данные устройств", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = xcpgDevices
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            if let dvtDownloads = viewModel.scanResult.xcodeCaches.dvtDownloads {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: dvtDownloads,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(dvtDownloads.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(dvtDownloads.id) {
-                                viewModel.selectedCacheInfos.remove(dvtDownloads.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(dvtDownloads.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = dvtDownloads
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: dvtDownloads, description: "загрузки и инструменты", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = dvtDownloads
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            if let xcTestDevices = viewModel.scanResult.xcodeCaches.xcTestDevices {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: xcTestDevices,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(xcTestDevices.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(xcTestDevices.id) {
-                                viewModel.selectedCacheInfos.remove(xcTestDevices.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(xcTestDevices.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = xcTestDevices
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: xcTestDevices, description: "данные тестирования", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = xcTestDevices
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    private var developmentCachesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Flutter Pub Cache (детальное сканирование отключено из-за медленности)
-            if let pubCache = viewModel.scanResult.developmentCaches.pubCache {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: pubCache,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(pubCache.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(pubCache.id) {
-                                viewModel.selectedCacheInfos.remove(pubCache.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(pubCache.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = pubCache
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: pubCache, description: "пакеты Dart/Flutter", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = pubCache
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            // Gradle cache
-            if let gradleCache = viewModel.scanResult.developmentCaches.gradleCache {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: gradleCache,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(gradleCache.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(gradleCache.id) {
-                                viewModel.selectedCacheInfos.remove(gradleCache.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(gradleCache.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = gradleCache
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: gradleCache, description: "кэш сборки Android", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = gradleCache
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            // npm cache
-            if let npmCache = viewModel.scanResult.developmentCaches.npmCache {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: npmCache,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(npmCache.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(npmCache.id) {
-                                viewModel.selectedCacheInfos.remove(npmCache.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(npmCache.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = npmCache
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: npmCache, description: "кэш Node.js пакетов", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = npmCache
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-            
-            // ~/.cache
-            if let homeCache = viewModel.scanResult.developmentCaches.homeCache {
-                if isMultiSelectMode {
-                    TopCacheSelectableRowView(
-                        cache: homeCache,
-                        isDisabled: viewModel.isCleaning,
-                        isSelected: viewModel.selectedCacheInfos.contains(homeCache.id),
-                        onToggleSelection: {
-                            if viewModel.selectedCacheInfos.contains(homeCache.id) {
-                                viewModel.selectedCacheInfos.remove(homeCache.id)
-                            } else {
-                                viewModel.selectedCacheInfos.insert(homeCache.id)
-                            }
-                        },
-                        onClean: {
-                            viewModel.selectedCache = homeCache
-                            viewModel.showingConfirmation = true
-                        }
-                    )
-                } else {
-                    CacheRowView(cache: homeCache, description: "системный кэш", isDisabled: viewModel.isCleaning) {
-                        viewModel.selectedCache = homeCache
-                        viewModel.showingConfirmation = true
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct FlutterPackageVersionRowView: View {
-    let package: FlutterPackageVersion
-    let isDisabled: Bool
-    let onDelete: () -> Void
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(package.version)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                    .padding(.leading, 20)
-            }
-            
-            Spacer()
-            
-            Text(package.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.green)
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-struct iOSDeviceRowView: View {
-    let device: iOSDeviceInfo
-    let isDisabled: Bool
-    let onDelete: () -> Void
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(device.displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                
-                Text(device.detailedDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Text(device.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-struct ArchiveRowView: View {
-    let archive: ArchiveInfo
-    let isDisabled: Bool
-    let onDelete: () -> Void
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(archive.displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                
-                Text(archive.detailedDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Text(archive.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-struct DerivedDataProjectRowView: View {
-    let project: DerivedDataProjectInfo
-    let isDisabled: Bool
-    let onDelete: () -> Void
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project.displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                
-                Text(project.detailedDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Text(project.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-struct CacheRowView: View {
-    let cache: CacheInfo
-    let description: String?
-    let onClean: () -> Void
-    let isDisabled: Bool
-    
-    init(cache: CacheInfo, description: String? = nil, isDisabled: Bool = false, onClean: @escaping () -> Void) {
-        self.cache = cache
-        self.description = description
-        self.isDisabled = isDisabled
-        self.onClean = onClean
-    }
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(cache.displayName)
-                    .font(.system(.body, design: .monospaced))
-                if let description = description {
-                    Text(description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
             
             Text(cache.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
+                .font(.system(.callout, design: .monospaced, weight: .medium))
+                .foregroundStyle(AppTheme.Category.xcode)
             
-            Button(action: onClean) {
+            Button(action: onDelete) {
                 Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
+                    .font(.system(size: 13))
+                    .foregroundStyle(isCleaning ? Color.gray.opacity(0.4) : AppTheme.Category.destructive)
             }
             .buttonStyle(.plain)
-            .disabled(isDisabled)
+            .disabled(isCleaning)
         }
-        .padding(.vertical, 4)
     }
 }
 
-/// Строка для топ-10 кэшей с чекбоксом выбора
-struct TopCacheSelectableRowView: View {
-    let cache: CacheInfo
-    let isDisabled: Bool
-    let isSelected: Bool
-    let onToggleSelection: () -> Void
-    let onClean: () -> Void
+// MARK: - Development Caches Card
+
+struct DevelopmentCachesCard: View {
+    @ObservedObject var viewModel: CacheViewModel
+    let isMultiSelectMode: Bool
     
     var body: some View {
-        HStack {
-            Button(action: onToggleSelection) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader(
+                icon: "chevron.left.forwardslash.chevron.right",
+                title: String(localized: "section.dev", defaultValue: "Разработка"),
+                subtitle: String(localized: "section.dev.subtitle", defaultValue: "Flutter, Gradle, npm, .cache"),
+                size: viewModel.scanResult.developmentTotalSize,
+                color: AppTheme.Category.development
+            )
             
-            VStack(alignment: .leading) {
-                Text(cache.displayName)
-                    .font(.system(.body, design: .monospaced))
-                Text("кэш")
+            devItem(viewModel.scanResult.developmentCaches.pubCache, String(localized: "dev.flutter", defaultValue: "пакеты Dart/Flutter"))
+            devItem(viewModel.scanResult.developmentCaches.gradleCache, String(localized: "dev.gradle", defaultValue: "кэш сборки Android"))
+            devItem(viewModel.scanResult.developmentCaches.npmCache, String(localized: "dev.npm", defaultValue: "кэш Node.js пакетов"))
+            devItem(viewModel.scanResult.developmentCaches.homeCache, String(localized: "dev.homeCache", defaultValue: "системный кэш"))
+        }
+        .glassCard(accent: AppTheme.Category.development)
+    }
+    
+    @ViewBuilder
+    private func devItem(_ cache: CacheInfo?, _ description: String) -> some View {
+        if let cache {
+            Divider().padding(.horizontal, AppTheme.Spacing.sm)
+            CacheItemRow.fromCache(
+                cache,
+                description: description,
+                accentColor: AppTheme.Category.development,
+                isMultiSelectMode: isMultiSelectMode,
+                isSelected: viewModel.selectedCacheInfos.contains(cache.id),
+                isDisabled: viewModel.isCleaning,
+                onToggleSelection: { toggleSelection(cache.id, in: &viewModel.selectedCacheInfos) },
+                onDelete: {
+                    viewModel.selectedCache = cache
+                    viewModel.showingConfirmation = true
+                }
+            )
+        }
+    }
+}
+
+// MARK: - Quick Scan Banner
+
+struct QuickScanBanner: View {
+    @ObservedObject var viewModel: CacheViewModel
+    
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.md) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(AppTheme.Category.general)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(localized: "quickScan.title", defaultValue: "Быстрое сканирование"))
+                    .font(.system(.subheadline, weight: .medium))
+                Text(String(localized: "quickScan.subtitle", defaultValue: "Запустите полное сканирование для детальной информации о проектах и архивах"))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
             
-            Text(cache.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onClean) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
+            Button(String(localized: "quickScan.button", defaultValue: "Полное сканирование")) {
+                Task { await viewModel.scanCaches(quick: false) }
             }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(viewModel.isScanning || viewModel.isCleaning)
         }
-        .padding(.vertical, 4)
+        .glassCard(accent: AppTheme.Category.general, showBar: false)
     }
 }
 
-/// Строка для проектов DerivedData с чекбоксом выбора
-struct DerivedDataProjectSelectableRowView: View {
-    let project: DerivedDataProjectInfo
-    let isDisabled: Bool
-    let isSelected: Bool
-    let onToggleSelection: () -> Void
-    let onClean: () -> Void
+// MARK: - Section Header
+
+struct SectionHeader: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let size: String
+    let color: Color
     
     var body: some View {
-        HStack {
-            Button(action: onToggleSelection) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project.displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
+        HStack(spacing: AppTheme.Spacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(color.gradient.opacity(0.15))
+                    .frame(width: 32, height: 32)
                 
-                Text(project.detailedDescription)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(.headline, design: .rounded))
+                Text(subtitle)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
             
-            Text(project.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onClean) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
+            Text(size)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(color)
         }
-        .padding(.vertical, 4)
+        .padding(.bottom, AppTheme.Spacing.sm)
     }
 }
 
-/// Строка для iOS устройств с чекбоксом выбора
-struct iOSDeviceSelectableRowView: View {
-    let device: iOSDeviceInfo
-    let isDisabled: Bool
-    let isSelected: Bool
-    let onToggleSelection: () -> Void
-    let onClean: () -> Void
-    
-    var body: some View {
-        HStack {
-            Button(action: onToggleSelection) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(device.displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                
-                Text(device.detailedDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Text(device.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onClean) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-        .padding(.vertical, 4)
+// MARK: - Helpers
+
+/// Toggle a UUID in a Set
+func toggleSelection(_ id: UUID, in set: inout Set<UUID>) {
+    if set.contains(id) {
+        set.remove(id)
+    } else {
+        set.insert(id)
     }
 }
 
-/// Строка для архивов с чекбоксом выбора
-struct ArchiveSelectableRowView: View {
-    let archive: ArchiveInfo
-    let isDisabled: Bool
-    let isSelected: Bool
-    let onToggleSelection: () -> Void
-    let onClean: () -> Void
-    
-    var body: some View {
-        HStack {
-            Button(action: onToggleSelection) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(archive.displayName)
-                    .font(.system(.body, design: .monospaced))
-                    .fontWeight(.medium)
-                
-                Text(archive.detailedDescription)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Text(archive.size)
-                .font(.system(.body, design: .monospaced))
-                .foregroundColor(.blue)
-            
-            Button(action: onClean) {
-                Image(systemName: "trash")
-                    .foregroundColor(isDisabled ? .gray : .red)
-            }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-        .padding(.vertical, 4)
-    }
-}
+// SizeHelper is defined in Theme/SizeHelper.swift
 
 #Preview {
     ContentView()
-} 
+}

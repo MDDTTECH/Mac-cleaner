@@ -104,6 +104,21 @@ struct CacheScanResult {
     var xcodeCaches: XcodeCacheInfo = .empty
     var developmentCaches: DevelopmentCacheInfo = .empty
     
+    /// Общий размер всех категорий (General + Xcode + Development)
+    var grandTotalSize: String {
+        let generalBytes = SizeHelper.parseSizeToBytes(totalSize)
+        let xcodeBytes = SizeHelper.parseSizeToBytes(xcodeTotalSize)
+        let devBytes = SizeHelper.parseSizeToBytes(developmentTotalSize)
+        let total = generalBytes + xcodeBytes + devBytes
+        
+        if total <= 0 { return "0 B" }
+        
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(total))
+    }
+    
     static var empty: CacheScanResult {
         CacheScanResult()
     }

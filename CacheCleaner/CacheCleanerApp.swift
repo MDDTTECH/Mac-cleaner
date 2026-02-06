@@ -13,5 +13,7 @@ struct CacheCleanerApp: App {
         WindowGroup {
             ContentView()
         }
+        .defaultSize(width: 720, height: 800)
+        .windowResizability(.contentSize)
     }
 }
