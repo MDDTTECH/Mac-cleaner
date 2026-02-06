@@ -6,6 +6,15 @@ class CacheViewModel: ObservableObject {
     @Published var isScanning = false
     @Published var scanningProgress: String = "Сканирование..."
     @Published var isQuickScan = true
+    
+    // Множественный выбор для CacheInfo (топ-10, Xcode, кэши разработки)
+    @Published var selectedCacheInfos: Set<UUID> = []
+    
+    // Множественный выбор для раскрывающихся списков с другими типами
+    @Published var selectedDerivedDataProjects: Set<UUID> = []
+    @Published var selectediOSDevices: Set<UUID> = []
+    @Published var selectedArchives: Set<UUID> = []
+    
     @Published var showingConfirmation = false
     @Published var selectedCache: CacheInfo?
     @Published var isCleaning = false
@@ -21,6 +30,13 @@ class CacheViewModel: ObservableObject {
     @Published var selectedFlutterPackage: FlutterPackageVersion?
     
     private let service = CacheService.shared
+    
+    var hasAnySelection: Bool {
+        !selectedCacheInfos.isEmpty ||
+        !selectedDerivedDataProjects.isEmpty ||
+        !selectediOSDevices.isEmpty ||
+        !selectedArchives.isEmpty
+    }
     
     func scanCaches(quick: Bool = true) async {
         isScanning = true
@@ -40,11 +56,11 @@ class CacheViewModel: ObservableObject {
         cleaningProgress = "Начинаем очистку..."
         
         let success = await service.cleanCache(cache.path)
-        
+
         if success {
             cleaningProgress = "Очистка завершена. Обновляем данные..."
             // Обновляем результаты сканирования после очистки
-            await scanCaches()
+            await scanCaches(quick: isQuickScan)
             cleaningProgress = "Готово!"
         } else {
             cleaningProgress = "Ошибка при очистке"
@@ -58,6 +74,119 @@ class CacheViewModel: ObservableObject {
         cleaningCacheName = ""
     }
     
+    /// Очистка всех выбранных элементов (любые разделы)
+    func cleanSelected() async {
+        guard hasAnySelection else { return }
+        
+        isCleaning = true
+        cleaningCacheName = "Несколько элементов"
+        cleaningProgress = "Начинаем очистку..."
+        
+        var hadError = false
+        
+        // Все CacheInfo, которые могут быть в интерфейсе
+        var allCacheInfos: [CacheInfo] = []
+        // Топ-10
+        allCacheInfos.append(contentsOf: scanResult.topCaches)
+        // Xcode верхнего уровня
+        if let derivedData = scanResult.xcodeCaches.derivedData {
+            allCacheInfos.append(derivedData)
+        }
+        if let deviceSupport = scanResult.xcodeCaches.deviceSupport {
+            allCacheInfos.append(deviceSupport)
+        }
+        if let archives = scanResult.xcodeCaches.archives {
+            allCacheInfos.append(archives)
+        }
+        if let simulator = scanResult.xcodeCaches.simulator {
+            allCacheInfos.append(simulator)
+        }
+        if let developerDiskImages = scanResult.xcodeCaches.developerDiskImages {
+            allCacheInfos.append(developerDiskImages)
+        }
+        if let xcpgDevices = scanResult.xcodeCaches.xcpgDevices {
+            allCacheInfos.append(xcpgDevices)
+        }
+        if let dvtDownloads = scanResult.xcodeCaches.dvtDownloads {
+            allCacheInfos.append(dvtDownloads)
+        }
+        if let xcTestDevices = scanResult.xcodeCaches.xcTestDevices {
+            allCacheInfos.append(xcTestDevices)
+        }
+        // Кэши разработки
+        if let pubCache = scanResult.developmentCaches.pubCache {
+            allCacheInfos.append(pubCache)
+        }
+        if let gradleCache = scanResult.developmentCaches.gradleCache {
+            allCacheInfos.append(gradleCache)
+        }
+        if let npmCache = scanResult.developmentCaches.npmCache {
+            allCacheInfos.append(npmCache)
+        }
+        if let homeCache = scanResult.developmentCaches.homeCache {
+            allCacheInfos.append(homeCache)
+        }
+        
+        for cache in allCacheInfos where selectedCacheInfos.contains(cache.id) {
+            cleaningCacheName = cache.displayName
+            let success = await service.cleanCache(cache.path)
+            if !success {
+                hadError = true
+            }
+        }
+        
+        // Проекты DerivedData
+        for project in scanResult.xcodeCaches.derivedDataProjects
+            where selectedDerivedDataProjects.contains(project.id) {
+            cleaningCacheName = project.displayName
+            let success = await service.cleanDerivedDataProject(project)
+            if !success {
+                hadError = true
+            }
+        }
+        
+        // Устройства iOS
+        for device in scanResult.xcodeCaches.iosDevices
+            where selectediOSDevices.contains(device.id) {
+            cleaningCacheName = device.displayName
+            let success = await service.cleaniOSDevice(device)
+            if !success {
+                hadError = true
+            }
+        }
+        
+        // Архивы
+        for archive in scanResult.xcodeCaches.archiveList
+            where selectedArchives.contains(archive.id) {
+            cleaningCacheName = archive.displayName
+            let success = await service.cleanArchive(archive)
+            if !success {
+                hadError = true
+            }
+        }
+        
+        if !hadError {
+            cleaningProgress = "Очистка завершена. Обновляем данные..."
+            await scanCaches(quick: isQuickScan)
+            cleaningProgress = "Готово!"
+        } else {
+            cleaningProgress = "Очистка завершена с ошибками"
+        }
+        
+        // Небольшая задержка чтобы пользователь увидел сообщение
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 секунда
+        
+        isCleaning = false
+        cleaningProgress = ""
+        cleaningCacheName = ""
+        
+        // Сбрасываем выбор
+        selectedCacheInfos.removeAll()
+        selectedDerivedDataProjects.removeAll()
+        selectediOSDevices.removeAll()
+        selectedArchives.removeAll()
+    }
+    
     func cleaniOSDevice(_ device: iOSDeviceInfo) async {
         isCleaning = true
         cleaningCacheName = device.displayName
@@ -68,7 +197,7 @@ class CacheViewModel: ObservableObject {
         if success {
             cleaningProgress = "Очистка завершена. Обновляем данные..."
             // Обновляем результаты сканирования после очистки
-            await scanCaches()
+            await scanCaches(quick: isQuickScan)
             cleaningProgress = "Готово!"
         } else {
             cleaningProgress = "Ошибка при очистке"
@@ -92,7 +221,7 @@ class CacheViewModel: ObservableObject {
         if success {
             cleaningProgress = "Очистка завершена. Обновляем данные..."
             // Обновляем результаты сканирования после очистки
-            await scanCaches()
+            await scanCaches(quick: isQuickScan)
             cleaningProgress = "Готово!"
         } else {
             cleaningProgress = "Ошибка при очистке"
@@ -116,7 +245,7 @@ class CacheViewModel: ObservableObject {
         if success {
             cleaningProgress = "Очистка завершена. Обновляем данные..."
             // Обновляем результаты сканирования после очистки
-            await scanCaches()
+            await scanCaches(quick: isQuickScan)
             cleaningProgress = "Готово!"
         } else {
             cleaningProgress = "Ошибка при очистке"
@@ -140,7 +269,7 @@ class CacheViewModel: ObservableObject {
         if success {
             cleaningProgress = "Очистка завершена. Обновляем данные..."
             // Обновляем результаты сканирования после очистки
-            await scanCaches()
+            await scanCaches(quick: isQuickScan)
             cleaningProgress = "Готово!"
         } else {
             cleaningProgress = "Ошибка при очистке"
