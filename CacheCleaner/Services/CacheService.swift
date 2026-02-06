@@ -4,17 +4,19 @@ class CacheService {
     static let shared = CacheService()
     private let fileManager = FileManager.default
     
-    private var homePath: String {
-        NSHomeDirectory()
-    }
-    
     private var realHomePath: String {
-        // Получаем реальный путь к домашней директории пользователя
-        ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        // В песочнице NSHomeDirectory() и $HOME указывают на контейнер приложения.
+        // getpwuid читает из системной базы и возвращает реальный home directory.
+        if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
+            return String(cString: home)
+        }
+        return NSHomeDirectory()
     }
     
     func scanCaches(quickScan: Bool = true, progressCallback: @escaping (String) async -> Void = { _ in }) async -> CacheScanResult {
         print("=== CacheCleaner: Starting scan (quickScan: \(quickScan)) ===")
+        print("CacheCleaner: NSHomeDirectory = \(NSHomeDirectory())")
+        print("CacheCleaner: realHomePath = \(realHomePath)")
         var result = CacheScanResult()
         
         // Общий размер кэшей
